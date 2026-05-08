@@ -15,7 +15,7 @@
       }
 
       h1 {
-        font-size: 38px;
+        font-size: 34px;
         margin-bottom: 8px;
       }
 
@@ -51,7 +51,7 @@
   </head>
   <body>
 
-    <h1>Mi app topada mega yetzing</h1>
+    <h1>Mi app pro</h1>
     <p>Organiza tus notas y estudia con inteligencia artificial.</p>
 
     <h2>Mis materias</h2>
@@ -62,11 +62,30 @@
       <li>Macroeconomía</li>
       <li>Calculo_1</li>
     </ul>
+<!-- Formulario de autenticación -->
+    <div id="seccion-auth">
+      <h2>Entrar a tu cuenta</h2>
+      
+      <input type="email" id="input-email" placeholder="Tu email">
+      <input type="password" id="input-password" placeholder="Tu contraseña">
+      
+      <button id="boton-registro">Crear cuenta</button>
+      <button id="boton-login">Iniciar sesión</button>
+    </div>
+
+    <!-- Esta sección solo aparece cuando estás autenticado -->
+    <div id="seccion-notas" style="display:none">
+      <h2>Mis notas</h2>
+      <!-- aquí va tu formulario de notas actual -->
+    </div>
+        <h2>Mis notas</h2>
+    <div id="lista-notas"></div>
 
     <h2>Nueva nota</h2>
-    <input type="text" placeholder="Título de la nota">
-    <textarea placeholder="Escribe tu nota aquí..."></textarea>
-    <button>Guardar nota</button>
+    <input type="text" id="input-titulo"placeholder="Título de la nota">
+    <textarea id="input-contenido" placeholder="Escribe tu nota aquí..."></textarea>
+    <button id="boton-guardar">Guardar nota</button>
 
+    <script type ="module" src="script.js"></script>
   </body>
 </html>
