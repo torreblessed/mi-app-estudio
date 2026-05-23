@@ -15,6 +15,7 @@ const listaNota = document.getElementById("lista-notas")
 // Secciones
 const seccionAuth = document.getElementById("seccion-auth")
 const seccionNotas = document.getElementById("seccion-notas")
+const botonCerrarSesion = document.getElementById("boton-cerrar-sesion")
 
 // --- AUTENTICACIÓN ---
 
@@ -51,6 +52,12 @@ supabase.auth.getSession().then(({ data }) => {
   if (data.session) {
     mostrarNotas()
   }
+})
+
+botonCerrarSesion.addEventListener("click", async function() {
+  await supabase.auth.signOut()
+  seccionNotas.style.display = "none"
+  seccionAuth.style.display = "block"
 })
 
 function mostrarNotas() {
