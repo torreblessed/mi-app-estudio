@@ -77,9 +77,11 @@ botonGuardar.addEventListener("click", async function() {
     return
   }
 
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { error } = await supabase
     .from("notas")
-    .insert({ titulo, contenido })
+    .insert({ titulo, contenido, user_id: user.id })
 
   if (error) {
     console.log("Error:", error)
@@ -94,9 +96,12 @@ botonGuardar.addEventListener("click", async function() {
 async function cargarNotas() {
   listaNota.innerHTML = ""
 
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { data, error } = await supabase
     .from("notas")
     .select("*")
+    .eq("user_id", user.id)
 
   if (error) {
     console.log("Error:", error)
