@@ -46,6 +46,50 @@
       button:hover {
         background: #4338ca;
       }
+
+      select {
+        width: 100%;
+        padding: 10px;
+        margin-top: 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        background: white;
+      }
+
+      #filtros-materia {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      #filtros-materia button {
+        margin-top: 0;
+        padding: 6px 14px;
+        background: #e5e7eb;
+        color: #333;
+        font-size: 13px;
+      }
+
+      #filtros-materia button:hover {
+        background: #d1d5db;
+      }
+
+      #filtros-materia button.activo {
+        background: #16a34a;
+        color: white;
+      }
+
+      .etiqueta-materia {
+        display: inline-block;
+        background: #dcfce7;
+        color: #15803d;
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-bottom: 4px;
+      }
     </style>
 
   </head>
@@ -79,10 +123,23 @@
       <button id="boton-cerrar-sesion" style="background:#dc2626;">Cerrar sesión</button>
     </div>
         <h2>Mis notas</h2>
+    <div id="filtros-materia">
+      <button class="activo" data-materia="">Todas</button>
+      <button data-materia="Cálculo diferencial">Cálculo diferencial</button>
+      <button data-materia="Termodinámica">Termodinámica</button>
+      <button data-materia="Programación">Programación</button>
+      <button data-materia="Física">Física</button>
+    </div>
     <div id="lista-notas"></div>
 
     <h2>Nueva nota</h2>
-    <input type="text" id="input-titulo"placeholder="Título de la nota">
+    <select id="select-materia">
+      <option value="Cálculo diferencial">Cálculo diferencial</option>
+      <option value="Termodinámica">Termodinámica</option>
+      <option value="Programación">Programación</option>
+      <option value="Física">Física</option>
+    </select>
+    <input type="text" id="input-titulo" placeholder="Título de la nota">
     <textarea id="input-contenido" placeholder="Escribe tu nota aquí..."></textarea>
     <button id="boton-guardar">Guardar nota</button>
 

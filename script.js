@@ -8,6 +8,7 @@ const botonLogin = document.getElementById("boton-login")
 
 // Elementos de notas
 const botonGuardar = document.getElementById("boton-guardar")
+const selectMateria = document.getElementById("select-materia")
 const inputTitulo = document.getElementById("input-titulo")
 const inputContenido = document.getElementById("input-contenido")
 const listaNota = document.getElementById("lista-notas")
@@ -77,11 +78,12 @@ botonGuardar.addEventListener("click", async function() {
     return
   }
 
+  const materia = selectMateria.value
   const { data: { user } } = await supabase.auth.getUser()
 
   const { error } = await supabase
     .from("notas")
-    .insert({ titulo, contenido, user_id: user.id })
+    .insert({ titulo, contenido, materia, user_id: user.id })
 
   if (error) {
     console.log("Error:", error)
@@ -93,15 +95,17 @@ botonGuardar.addEventListener("click", async function() {
   }
 })
 
-async function cargarNotas() {
+async function cargarNotas(materiaFiltro = "") {
   listaNota.innerHTML = ""
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data, error } = await supabase
-    .from("notas")
-    .select("*")
-    .eq("user_id", user.id)
+  let query = supabase.from("notas").select("*").eq("user_id", user.id)
+  if (materiaFiltro) {
+    query = query.eq("materia", materiaFiltro)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.log("Error:", error)
@@ -111,6 +115,7 @@ async function cargarNotas() {
   data.forEach(function(nota) {
     const tarjeta = document.createElement("div")
     tarjeta.innerHTML = `
+      <span class="etiqueta-materia">${nota.materia || "Sin materia"}</span>
       <h3>${nota.titulo}</h3>
       <p>${nota.contenido}</p>
       <hr>
@@ -118,3 +123,14 @@ async function cargarNotas() {
     listaNota.appendChild(tarjeta)
   })
 }
+
+// Filtros por materia
+document.getElementById("filtros-materia").addEventListener("click", function(e) {
+  const boton = e.target.closest("button")
+  if (!boton) return
+
+  document.querySelectorAll("#filtros-materia button").forEach(b => b.classList.remove("activo"))
+  boton.classList.add("activo")
+
+  cargarNotas(boton.dataset.materia)
+})
