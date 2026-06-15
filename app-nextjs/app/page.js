@@ -38,11 +38,6 @@ function daysLabel(n) {
   return `En ${n} días`
 }
 
-// For the weekly events sidebar (still static data)
-function subjectById(id) {
-  return SUBJECTS.find(s => s.id === id) || SUBJECTS[0]
-}
-
 // For tasks from Supabase (materia is stored as text)
 function subjectByMateria(materia) {
   return SUBJECTS.find(s => s.materia === materia) || null
@@ -70,13 +65,25 @@ const SUBJECT_COLOR = {
   'Cálculo 1':           'e',
 }
 
-const WEEK_EVENTS = [
-  { id: 'e1', date: '2026-05-26', weekday: 'mar', day: 26, type: 'Quiz',    subject: 'calc2', title: 'Quiz semanal',          time: '19:00' },
-  { id: 'e2', date: '2026-05-29', weekday: 'vie', day: 29, type: 'Lectura', subject: 'macro', title: 'Cap. 6 — Inflación' },
-  { id: 'e3', date: '2026-05-31', weekday: 'dom', day: 31, type: 'Entrega', subject: 'prog',  title: 'Laboratorio 3',         time: '23:59' },
-  { id: 'e4', date: '2026-06-02', weekday: 'mar', day:  2, type: 'Control', subject: 'termo', title: 'Control 1 — Gas ideal', time: '10:00' },
-  { id: 'e5', date: '2026-06-07', weekday: 'dom', day:  7, type: 'Prueba',  subject: 'calc',  title: 'Prueba 2 — Límites',    time: '09:00' },
-]
+const TIPO_PILL = {
+  tarea:   'c',
+  prueba:  'd',
+  entrega: 'a',
+  lectura: 'b',
+  quiz:    'e',
+}
+
+const TIPO_LABEL = {
+  tarea:   'Tarea',
+  prueba:  'Prueba',
+  entrega: 'Entrega',
+  lectura: 'Lectura',
+  quiz:    'Quiz',
+}
+
+const TIPOS_FORM = ['tarea', 'prueba', 'entrega', 'lectura', 'quiz']
+
+const WEEKDAYS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 
 const FILTROS = [
   { label: 'Todas',               value: '' },
@@ -88,8 +95,6 @@ const FILTROS = [
 ]
 
 const MATERIAS_FORM = ['Cálculo diferencial', 'Termodinámica', 'Programación', 'Macroeconomía', 'Cálculo 1']
-
-const THIS_WEEK_TESTS = WEEK_EVENTS.filter(e => ['Prueba', 'Control', 'Quiz'].includes(e.type)).length
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 function EmptyState({ title, sub }) {
@@ -248,7 +253,7 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
 }
 
 // ── Task Modal ────────────────────────────────────────────────────────────────
-function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, duracion, setDuracion, hora, setHora, creando }) {
+function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, tipo, setTipo, fecha, setFecha, duracion, setDuracion, hora, setHora, creando }) {
   useEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', h)
@@ -261,7 +266,7 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, d
         <div className="modal-head">
           <div>
             <h2 className="card-title">Nueva tarea</h2>
-            <div className="card-sub">Agrega una tarea para hoy</div>
+            <div className="card-sub">Agrégala al calendario semanal</div>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Cerrar"><IconX /></button>
         </div>
@@ -274,21 +279,32 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, d
                 style={{ paddingLeft: '14px' }} autoFocus />
             </div>
           </div>
-          <div className="field">
-            <label className="label" htmlFor="tm-materia">Materia</label>
-            <div className="input-wrap">
-              <select id="tm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
-                {MATERIAS_FORM.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <span className="select-arrow"><IconChevron /></span>
+          <div className="modal-row-2">
+            <div className="field">
+              <label className="label" htmlFor="tm-materia">Materia</label>
+              <div className="input-wrap">
+                <select id="tm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
+                  {MATERIAS_FORM.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <span className="select-arrow"><IconChevron /></span>
+              </div>
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="tm-tipo">Tipo</label>
+              <div className="input-wrap">
+                <select id="tm-tipo" value={tipo} onChange={e => setTipo(e.target.value)}>
+                  {TIPOS_FORM.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+                </select>
+                <span className="select-arrow"><IconChevron /></span>
+              </div>
             </div>
           </div>
           <div className="modal-row-2">
             <div className="field">
-              <label className="label" htmlFor="tm-duracion">Duración (min)</label>
+              <label className="label" htmlFor="tm-fecha">Fecha</label>
               <div className="input-wrap">
-                <input type="number" id="tm-duracion" min="5" step="5" placeholder="30"
-                  value={duracion} onChange={e => setDuracion(e.target.value)}
+                <input type="date" id="tm-fecha"
+                  value={fecha} onChange={e => setFecha(e.target.value)}
                   style={{ paddingLeft: '14px' }} />
               </div>
             </div>
@@ -299,6 +315,14 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, d
                   value={hora} onChange={e => setHora(e.target.value)}
                   style={{ paddingLeft: '14px' }} />
               </div>
+            </div>
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="tm-duracion">Duración (min)</label>
+            <div className="input-wrap">
+              <input type="number" id="tm-duracion" min="5" step="5" placeholder="30"
+                value={duracion} onChange={e => setDuracion(e.target.value)}
+                style={{ paddingLeft: '14px' }} />
             </div>
           </div>
           <button className="btn btn-primary" style={{ width: '100%', padding: '13px 18px' }}
@@ -327,9 +351,15 @@ export default function HomePage() {
   const [tareaModalOpen, setTareaModalOpen] = useState(false)
   const [tituloTarea,    setTituloTarea]    = useState('')
   const [materiaTarea,   setMateriaTarea]   = useState('Cálculo diferencial')
+  const [tipoTarea,      setTipoTarea]      = useState('tarea')
+  const [fechaTarea,     setFechaTarea]     = useState('')
   const [duracionTarea,  setDuracionTarea]  = useState(30)
   const [horaTarea,      setHoraTarea]      = useState('')
   const [creandoTarea,   setCreandoTarea]   = useState(false)
+
+  // Calendario semanal (Supabase)
+  const [weekTareas,    setWeekTareas]    = useState([])
+  const [loadingWeek,   setLoadingWeek]   = useState(true)
 
   // Notas (Supabase)
   const [notas,     setNotas]     = useState([])
@@ -377,6 +407,31 @@ export default function HomePage() {
     if (ready) cargarTareas()
   }, [ready, cargarTareas])
 
+  const cargarCalendario = useCallback(async () => {
+    setLoadingWeek(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setLoadingWeek(false); return }
+    const hoy = new Date()
+    const desde = hoy.toISOString().slice(0, 10)
+    const fin = new Date(hoy)
+    fin.setDate(fin.getDate() + 7)
+    const hasta = fin.toISOString().slice(0, 10)
+    const { data, error } = await supabase
+      .from('tareas')
+      .select('*')
+      .eq('user_id', u.id)
+      .gte('fecha', desde)
+      .lte('fecha', hasta)
+      .order('fecha', { ascending: true })
+      .order('hora', { ascending: true, nullsFirst: false })
+    if (!error) setWeekTareas(data ?? [])
+    setLoadingWeek(false)
+  }, [])
+
+  useEffect(() => {
+    if (ready) cargarCalendario()
+  }, [ready, cargarCalendario])
+
   async function toggleTarea(id, completada) {
     // Optimistic update
     setTareas(prev => prev.map(t => t.id === id ? { ...t, completada: !completada } : t))
@@ -396,22 +451,27 @@ export default function HomePage() {
     setCreandoTarea(true)
     const { data: { user: u } } = await supabase.auth.getUser()
     const hoy = new Date().toISOString().slice(0, 10)
+    const fechaFinal = fechaTarea || hoy
     const { error } = await supabase.from('tareas').insert({
-      user_id:     u.id,
-      titulo:      tituloTarea.trim(),
-      materia:     materiaTarea,
+      user_id:      u.id,
+      titulo:       tituloTarea.trim(),
+      materia:      materiaTarea,
+      tipo:         tipoTarea,
       duracion_min: Number(duracionTarea) || 30,
-      hora:        horaTarea || null,
-      completada:  false,
-      fecha:       hoy,
+      hora:         horaTarea || null,
+      completada:   false,
+      fecha:        fechaFinal,
     })
     if (!error) {
       setTituloTarea('')
       setMateriaTarea('Cálculo diferencial')
+      setTipoTarea('tarea')
+      setFechaTarea('')
       setDuracionTarea(30)
       setHoraTarea('')
       setTareaModalOpen(false)
-      cargarTareas()
+      if (fechaFinal === hoy) cargarTareas()
+      cargarCalendario()
     } else {
       console.error(error)
     }
@@ -457,6 +517,14 @@ export default function HomePage() {
   const remaining    = tareas.filter(t => !t.completada).length
   const totalMinutes = tareas.filter(t => !t.completada).reduce((s, t) => s + (t.duracion_min || 0), 0)
   const todayStr     = new Date().toISOString().slice(0, 10)
+  const thisWeekTests = weekTareas.filter(t => ['prueba', 'quiz'].includes(t.tipo)).length
+
+  // Agrupar weekTareas por fecha
+  const weekDays = [...new Set(weekTareas.map(t => t.fecha))].sort()
+  function weekDayLabel(fecha) {
+    const d = new Date(fecha + 'T12:00:00')
+    return { wd: WEEKDAYS_ES[d.getDay()], day: d.getDate() }
+  }
 
   return (
     <>
@@ -476,7 +544,7 @@ export default function HomePage() {
             <h1 className="hero-title">
               Hola, André.{' '}
               <span className="hero-accent">
-                Esta semana tienes <strong>{THIS_WEEK_TESTS} evaluaciones</strong> y{' '}
+                Esta semana tienes <strong>{thisWeekTests} evaluaciones</strong> y{' '}
                 {remaining} {remaining === 1 ? 'tarea' : 'tareas'} pendientes para hoy.
               </span>
             </h1>
@@ -624,36 +692,62 @@ export default function HomePage() {
               <div className="card-head">
                 <div>
                   <h2 className="card-title">Esta semana</h2>
-                  <div className="card-sub">{WEEK_EVENTS.length} eventos próximos</div>
+                  <div className="card-sub">
+                    {loadingWeek ? 'Cargando…' : `${weekTareas.length} evento${weekTareas.length !== 1 ? 's' : ''} próximos`}
+                  </div>
                 </div>
                 <button className="icon-btn sm" title="Ver calendario">
                   <IconCalendar />
                 </button>
               </div>
-              <ul className="week-list">
-                {WEEK_EVENTS.map(ev => {
-                  const s       = subjectById(ev.subject)
-                  const isToday = ev.date === todayStr
-                  return (
-                    <li key={ev.id} className={`wk ${isToday ? 'wk-today' : ''}`}>
-                      <div className="wk-date">
-                        <div className="wk-wd">{ev.weekday}</div>
-                        <div className="wk-d">{String(ev.day).padStart(2, '0')}</div>
-                      </div>
-                      <div className="wk-body">
-                        <div className="wk-row">
-                          <span className={`pill pill-${s.color}`}>{ev.type}</span>
-                          {ev.time && <span className="wk-time">{ev.time}</span>}
-                        </div>
-                        <div className="wk-title">{ev.title}</div>
-                        <div className="wk-sub">
-                          <span className={`dot dot-${s.color}`} />{s.name}
-                        </div>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
+              {loadingWeek ? (
+                <p className="task-loading">Cargando calendario…</p>
+              ) : weekTareas.length === 0 ? (
+                <div className="task-empty">
+                  <span>Sin eventos los próximos 7 días.</span>
+                  <button className="link-mini" onClick={() => setTareaModalOpen(true)}>+ Agregar una</button>
+                </div>
+              ) : (
+                <ul className="week-list">
+                  {weekDays.map(fecha => {
+                    const { wd, day } = weekDayLabel(fecha)
+                    const isToday = fecha === todayStr
+                    const eventos = weekTareas.filter(t => t.fecha === fecha)
+                    return eventos.map((ev, i) => {
+                      const s = subjectByMateria(ev.materia)
+                      const pillColor = TIPO_PILL[ev.tipo] || 'c'
+                      return (
+                        <li key={ev.id} className={`wk ${isToday ? 'wk-today' : ''}`}>
+                          <div className="wk-date">
+                            {i === 0 ? (
+                              <>
+                                <div className="wk-wd">{wd}</div>
+                                <div className="wk-d">{String(day).padStart(2, '0')}</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="wk-wd" />
+                                <div className="wk-d" />
+                              </>
+                            )}
+                          </div>
+                          <div className="wk-body">
+                            <div className="wk-row">
+                              <span className={`pill pill-${pillColor}`}>{TIPO_LABEL[ev.tipo] || ev.tipo}</span>
+                              {ev.hora && <span className="wk-time">{ev.hora.slice(0, 5)}</span>}
+                            </div>
+                            <div className="wk-title">{ev.titulo}</div>
+                            <div className="wk-sub">
+                              {s && <span className={`dot dot-${s.color}`} />}
+                              {ev.materia}
+                            </div>
+                          </div>
+                        </li>
+                      )
+                    })
+                  })}
+                </ul>
+              )}
             </section>
           </aside>
 
@@ -690,6 +784,10 @@ export default function HomePage() {
           setTitulo={setTituloTarea}
           materia={materiaTarea}
           setMateria={setMateriaTarea}
+          tipo={tipoTarea}
+          setTipo={setTipoTarea}
+          fecha={fechaTarea}
+          setFecha={setFechaTarea}
           duracion={duracionTarea}
           setDuracion={setDuracionTarea}
           hora={horaTarea}
