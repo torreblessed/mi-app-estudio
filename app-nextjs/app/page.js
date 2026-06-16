@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import AppShell from '@/components/AppShell'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconBook()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
@@ -651,9 +652,7 @@ export default function HomePage() {
   }
 
   return (
-    <>
-      <Topbar user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen} menuRef={menuRef} onLogout={cerrarSesion} />
-
+    <AppShell user={user}>
       <main className="dash-body">
 
         {/* Alert banner */}
@@ -910,6 +909,6 @@ export default function HomePage() {
           onSave={updates => actualizarTarea(editTareaData.id, updates)}
           materiasList={materiasList} />
       )}
-    </>
+    </AppShell>
   )
 }

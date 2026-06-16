@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import AppShell from '@/components/AppShell'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconBook()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
@@ -446,10 +447,7 @@ export default function MateriaPage() {
   }
 
   return (
-    <>
-      <Topbar user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen}
-        menuRef={menuRef} onLogout={cerrarSesion} crumb={nombre} />
-
+    <AppShell user={user}>
       <main className="subj-body">
         <button className="back-btn" onClick={() => router.push('/')}>
           <IconArrowLeft /> Volver al panel
@@ -488,7 +486,8 @@ export default function MateriaPage() {
             <div className="tutor-banner-title">Tutor IA</div>
             <div className="tutor-banner-sub">Prepara evaluaciones, resuelve dudas y genera resúmenes con IA.</div>
           </div>
-          <button className="btn btn-primary sm" disabled title="Próximamente">
+          <button className="btn btn-primary sm"
+            onClick={() => router.push(`/materia/${encodeURIComponent(nombre)}/tutor`)}>
             <IconSparkle /> Abrir tutor
           </button>
         </div>
@@ -643,6 +642,6 @@ export default function MateriaPage() {
           onClose={() => setEditTarea(null)}
           onSave={updates => actualizarTarea(editTarea.id, updates)} />
       )}
-    </>
+    </AppShell>
   )
 }
