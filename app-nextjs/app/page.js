@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -38,65 +38,32 @@ function daysLabel(n) {
   return `En ${n} días`
 }
 
-// For tasks from Supabase (materia is stored as text)
-function subjectByMateria(materia) {
-  return SUBJECTS.find(s => s.materia === materia) || null
+function materiaColor(nombre) {
+  if (!nombre) return 'a'
+  const palette = ['a', 'b', 'c', 'd', 'e']
+  let hash = 0
+  for (let i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) & 0xFFFF
+  return palette[hash % palette.length]
 }
 
-// ── Static data ───────────────────────────────────────────────────────────────
-const SUBJECTS = [
-  { id: 'calc',  code: 'MAT-101', name: 'Cálculo diferencial', materia: 'Cálculo diferencial', color: 'a',
-    professor: 'Dra. Ramírez',  progress: 65, nextEval: { type: 'Prueba',  title: 'Prueba 2 — Límites',    daysAway: 12 } },
-  { id: 'termo', code: 'FIS-201', name: 'Termodinámica',        materia: 'Termodinámica',        color: 'b',
-    professor: 'Prof. Lagos',   progress: 48, nextEval: { type: 'Control', title: 'Control 1 — Gas ideal', daysAway: 7  } },
-  { id: 'prog',  code: 'PRG-101', name: 'Programación',         materia: 'Programación',         color: 'c',
-    professor: 'Prof. Mendoza', progress: 78, nextEval: { type: 'Entrega', title: 'Laboratorio 3',         daysAway: 5  } },
-  { id: 'macro', code: 'ECO-101', name: 'Macroeconomía',        materia: 'Macroeconomía',        color: 'd',
-    professor: 'Dr. Salinas',   progress: 35, nextEval: { type: 'Lectura', title: 'Cap. 6 — Inflación',    daysAway: 3  } },
-  { id: 'calc2', code: 'MAT-201', name: 'Cálculo 1',            materia: 'Cálculo 1',            color: 'e',
-    professor: 'Por asignar',   progress: 55, nextEval: { type: 'Quiz',    title: 'Quiz semanal',          daysAway: 0  } },
-]
+// ── Constants ─────────────────────────────────────────────────────────────────
+const TIPO_PILL  = { tarea:'c', prueba:'d', entrega:'a', lectura:'b', quiz:'e' }
+const TIPO_LABEL = { tarea:'Tarea', prueba:'Prueba', entrega:'Entrega', lectura:'Lectura', quiz:'Quiz' }
+const TIPOS_FORM  = ['tarea','prueba','entrega','lectura','quiz']
+const WEEKDAYS_ES = ['dom','lun','mar','mié','jue','vie','sáb']
 
-const SUBJECT_COLOR = {
-  'Cálculo diferencial': 'a',
-  'Termodinámica':       'b',
-  'Programación':        'c',
-  'Macroeconomía':       'd',
-  'Cálculo 1':           'e',
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+function SkeletonTasks() {
+  return <div className="skeleton-list">{[1,2,3].map(i=><div key={i} className="skeleton-task"/>)}</div>
+}
+function SkeletonCards() {
+  return <div className="skeleton-grid">{[1,2,3].map(i=><div key={i} className="skeleton-card"/>)}</div>
+}
+function SkeletonNotes() {
+  return <div className="skeleton-notes-grid">{[1,2,3].map(i=><div key={i} className="skeleton-note"/>)}</div>
 }
 
-const TIPO_PILL = {
-  tarea:   'c',
-  prueba:  'd',
-  entrega: 'a',
-  lectura: 'b',
-  quiz:    'e',
-}
-
-const TIPO_LABEL = {
-  tarea:   'Tarea',
-  prueba:  'Prueba',
-  entrega: 'Entrega',
-  lectura: 'Lectura',
-  quiz:    'Quiz',
-}
-
-const TIPOS_FORM = ['tarea', 'prueba', 'entrega', 'lectura', 'quiz']
-
-const WEEKDAYS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
-
-const FILTROS = [
-  { label: 'Todas',               value: '' },
-  { label: 'Cálculo diferencial', value: 'Cálculo diferencial' },
-  { label: 'Termodinámica',       value: 'Termodinámica' },
-  { label: 'Programación',        value: 'Programación' },
-  { label: 'Macroeconomía',       value: 'Macroeconomía' },
-  { label: 'Cálculo 1',           value: 'Cálculo 1' },
-]
-
-const MATERIAS_FORM = ['Cálculo diferencial', 'Termodinámica', 'Programación', 'Macroeconomía', 'Cálculo 1']
-
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 function EmptyState({ title, sub }) {
   return (
     <div className="empty">
@@ -111,50 +78,47 @@ function EmptyState({ title, sub }) {
   )
 }
 
-function SubjectCard({ subject, notasCount }) {
-  const s      = subject
-  const urgent = s.nextEval.daysAway <= 3
+// ── Subject card ──────────────────────────────────────────────────────────────
+function SubjectCard({ materia, onClick }) {
+  const color  = materiaColor(materia.nombre)
+  const ne     = materia.nextEval
+  const urgent = ne && ne.daysAway <= 3
   return (
-    <div className="subj-card">
+    <button className="subj-card" onClick={onClick}>
       <div className="subj-card-head">
         <div className="subj-codeline">
-          <span className={`dot dot-${s.color}`} />
-          <span>{s.code}</span>
+          <span className={`dot dot-${color}`} />
+          <span>{materia.nombre}</span>
         </div>
         <span className="foot-stat" style={{ fontSize: 11 }}>
-          {notasCount} nota{notasCount !== 1 ? 's' : ''}
+          {materia.notasCount} nota{materia.notasCount !== 1 ? 's' : ''}
         </span>
       </div>
-      <div>
-        <div className="subj-name">{s.name}</div>
-        <div className="subj-prof">{s.professor}</div>
-      </div>
-      <div className="subj-next">
-        <div className="next-eyebrow">Próxima · {s.nextEval.type}</div>
-        <div className="next-row">
-          <span className="next-title">{s.nextEval.title}</span>
-          <span className={`next-when${urgent ? ' urgent' : ''}`}>
-            {daysLabel(s.nextEval.daysAway)}
-          </span>
+      <div className="subj-name">{materia.nombre}</div>
+      {ne ? (
+        <div className="subj-next">
+          <div className="next-eyebrow">Próxima · {TIPO_LABEL[ne.tipo] || ne.tipo}</div>
+          <div className="next-row">
+            <span className="next-title">{ne.titulo}</span>
+            <span className={`next-when${urgent ? ' urgent' : ''}`}>{daysLabel(ne.daysAway)}</span>
+          </div>
         </div>
-      </div>
-      <div className="subj-progress">
-        <div className="progress-row">
-          <span className="progress-label">Avance</span>
-          <span className="progress-val">{s.progress}%</span>
+      ) : (
+        <div className="subj-next">
+          <div className="next-eyebrow" style={{ color: 'var(--ink-5)' }}>Sin evaluaciones próximas</div>
         </div>
-        <div className="bar">
-          <div className="bar-fill" style={{ width: `${s.progress}%` }} />
-        </div>
-      </div>
-    </div>
+      )}
+    </button>
   )
 }
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
 function Topbar({ user, menuOpen, setMenuOpen, menuRef, onLogout }) {
   const initial     = user?.email ? user.email[0].toUpperCase() : 'U'
-  const displayName = user?.email?.split('@')[0] || 'Estudiante'
+  const displayName = user?.user_metadata?.full_name?.split(' ')[0]
+    || user?.user_metadata?.name?.split(' ')[0]
+    || user?.email?.split('@')[0]
+    || 'Estudiante'
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -168,10 +132,7 @@ function Topbar({ user, menuOpen, setMenuOpen, menuRef, onLogout }) {
             <input placeholder="Buscar en materias, notas…" readOnly />
             <span className="kbd">⌘K</span>
           </div>
-          <button className="icon-btn" title="Notificaciones">
-            <IconBell />
-            <span className="dot-badge" />
-          </button>
+          <button className="icon-btn" title="Notificaciones"><IconBell /><span className="dot-badge" /></button>
           <div className="user-menu" ref={menuRef}>
             <button className="avatar-btn" onClick={() => setMenuOpen(o => !o)}>
               <span className="avatar">{initial}</span>
@@ -199,10 +160,10 @@ function Topbar({ user, menuOpen, setMenuOpen, menuRef, onLogout }) {
   )
 }
 
-// ── Note Modal ────────────────────────────────────────────────────────────────
-function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, contenido, setContenido, guardando }) {
+// ── Note modal ────────────────────────────────────────────────────────────────
+function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, contenido, setContenido, guardando, materiasList }) {
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose() }
+    const h = e => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [onClose])
@@ -211,28 +172,28 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
         <div className="modal-head">
-          <div>
-            <h2 className="card-title">Nueva nota</h2>
-            <div className="card-sub">Guarda apuntes por materia</div>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar"><IconX /></button>
+          <div><h2 className="card-title">Nueva nota</h2><div className="card-sub">Guarda apuntes por materia</div></div>
+          <button className="modal-close" onClick={onClose}><IconX /></button>
         </div>
         <div className="card-fields">
           <div className="field">
             <label className="label" htmlFor="nm-materia">Materia</label>
             <div className="input-wrap">
-              <select id="nm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
-                {MATERIAS_FORM.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <span className="select-arrow"><IconChevron /></span>
+              {materiasList.length > 0 ? (
+                <><select id="nm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
+                  {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
+                </select><span className="select-arrow"><IconChevron /></span></>
+              ) : (
+                <input type="text" id="nm-materia" placeholder="Nombre de la materia"
+                  value={materia} onChange={e => setMateria(e.target.value)} style={{ paddingLeft:'14px' }} />
+              )}
             </div>
           </div>
           <div className="field">
             <label className="label" htmlFor="nm-titulo">Título</label>
             <div className="input-wrap">
               <input type="text" id="nm-titulo" placeholder="Título de la nota"
-                value={titulo} onChange={e => setTitulo(e.target.value)}
-                style={{ paddingLeft: '14px' }} autoFocus />
+                value={titulo} onChange={e => setTitulo(e.target.value)} style={{ paddingLeft:'14px' }} autoFocus />
             </div>
           </div>
           <div className="field">
@@ -242,8 +203,7 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
                 value={contenido} onChange={e => setContenido(e.target.value)} />
             </div>
           </div>
-          <button className="btn btn-primary" style={{ width: '100%', padding: '13px 18px' }}
-            onClick={onSave} disabled={guardando}>
+          <button className="btn btn-primary" style={{ width:'100%', padding:'13px 18px' }} onClick={onSave} disabled={guardando}>
             <IconSave />{guardando ? 'Guardando…' : 'Guardar nota'}
           </button>
         </div>
@@ -252,41 +212,51 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
   )
 }
 
-// ── Task Modal ────────────────────────────────────────────────────────────────
-function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, tipo, setTipo, fecha, setFecha, duracion, setDuracion, hora, setHora, creando }) {
+// ── Task modal (crear) ────────────────────────────────────────────────────────
+function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, tipo, setTipo, fecha, setFecha, duracion, setDuracion, hora, setHora, creando, materiasList }) {
+  const [error, setError] = useState('')
+
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onClose() }
+    const h = e => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [onClose])
+
+  function handleSave() {
+    if (!titulo.trim()) { setError('El título es obligatorio'); return }
+    setError('')
+    onSave()
+  }
 
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
         <div className="modal-head">
-          <div>
-            <h2 className="card-title">Nueva tarea</h2>
-            <div className="card-sub">Agrégala al calendario semanal</div>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar"><IconX /></button>
+          <div><h2 className="card-title">Nueva tarea</h2><div className="card-sub">Agrégala al calendario semanal</div></div>
+          <button className="modal-close" onClick={onClose}><IconX /></button>
         </div>
         <div className="card-fields">
           <div className="field">
             <label className="label" htmlFor="tm-titulo">Título</label>
-            <div className="input-wrap">
+            <div className="input-wrap" style={error ? {borderColor:'var(--danger)'} : {}}>
               <input type="text" id="tm-titulo" placeholder="¿Qué vas a estudiar?"
-                value={titulo} onChange={e => setTitulo(e.target.value)}
-                style={{ paddingLeft: '14px' }} autoFocus />
+                value={titulo} onChange={e => { setTitulo(e.target.value); if(error) setError('') }}
+                style={{ paddingLeft:'14px' }} autoFocus />
             </div>
+            {error && <div className="field-error">{error}</div>}
           </div>
           <div className="modal-row-2">
             <div className="field">
               <label className="label" htmlFor="tm-materia">Materia</label>
               <div className="input-wrap">
-                <select id="tm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
-                  {MATERIAS_FORM.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <span className="select-arrow"><IconChevron /></span>
+                {materiasList.length > 0 ? (
+                  <><select id="tm-materia" value={materia} onChange={e => setMateria(e.target.value)}>
+                    {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select><span className="select-arrow"><IconChevron /></span></>
+                ) : (
+                  <input type="text" id="tm-materia" placeholder="Materia"
+                    value={materia} onChange={e => setMateria(e.target.value)} style={{ paddingLeft:'14px' }} />
+                )}
               </div>
             </div>
             <div className="field">
@@ -303,17 +273,13 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, t
             <div className="field">
               <label className="label" htmlFor="tm-fecha">Fecha</label>
               <div className="input-wrap">
-                <input type="date" id="tm-fecha"
-                  value={fecha} onChange={e => setFecha(e.target.value)}
-                  style={{ paddingLeft: '14px' }} />
+                <input type="date" id="tm-fecha" value={fecha} onChange={e => setFecha(e.target.value)} style={{ paddingLeft:'14px' }} />
               </div>
             </div>
             <div className="field">
               <label className="label" htmlFor="tm-hora">Hora</label>
               <div className="input-wrap">
-                <input type="time" id="tm-hora"
-                  value={hora} onChange={e => setHora(e.target.value)}
-                  style={{ paddingLeft: '14px' }} />
+                <input type="time" id="tm-hora" value={hora} onChange={e => setHora(e.target.value)} style={{ paddingLeft:'14px' }} />
               </div>
             </div>
           </div>
@@ -321,13 +287,105 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, materia, setMateria, t
             <label className="label" htmlFor="tm-duracion">Duración (min)</label>
             <div className="input-wrap">
               <input type="number" id="tm-duracion" min="5" step="5" placeholder="30"
-                value={duracion} onChange={e => setDuracion(e.target.value)}
-                style={{ paddingLeft: '14px' }} />
+                value={duracion} onChange={e => setDuracion(e.target.value)} style={{ paddingLeft:'14px' }} />
             </div>
           </div>
-          <button className="btn btn-primary" style={{ width: '100%', padding: '13px 18px' }}
-            onClick={onSave} disabled={creando}>
+          <button className="btn btn-primary" style={{ width:'100%', padding:'13px 18px' }} onClick={handleSave} disabled={creando}>
             <IconSave />{creando ? 'Guardando…' : 'Agregar tarea'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit task modal ───────────────────────────────────────────────────────────
+function EditTareaModal({ onClose, onSave, tarea, materiasList }) {
+  const [titulo,   setTitulo]   = useState(tarea.titulo || '')
+  const [materia,  setMateria]  = useState(tarea.materia || '')
+  const [tipo,     setTipo]     = useState(tarea.tipo || 'tarea')
+  const [fecha,    setFecha]    = useState(tarea.fecha || '')
+  const [hora,     setHora]     = useState(tarea.hora || '')
+  const [duracion, setDuracion] = useState(tarea.duracion_min || 30)
+  const [error,    setError]    = useState('')
+  const [saving,   setSaving]   = useState(false)
+
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+
+  async function handleSave() {
+    if (!titulo.trim()) { setError('El título es obligatorio'); return }
+    setSaving(true)
+    await onSave({ titulo: titulo.trim(), materia, tipo, fecha, hora: hora || null, duracion_min: Number(duracion) || 30 })
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal">
+        <div className="modal-head">
+          <div><h2 className="card-title">Editar tarea</h2><div className="card-sub">Modifica los datos de esta tarea</div></div>
+          <button className="modal-close" onClick={onClose}><IconX /></button>
+        </div>
+        <div className="card-fields">
+          <div className="field">
+            <label className="label">Título</label>
+            <div className="input-wrap" style={error ? {borderColor:'var(--danger)'} : {}}>
+              <input type="text" placeholder="¿Qué vas a estudiar?" value={titulo}
+                onChange={e => { setTitulo(e.target.value); if(error) setError('') }}
+                style={{ paddingLeft:'14px' }} autoFocus />
+            </div>
+            {error && <div className="field-error">{error}</div>}
+          </div>
+          <div className="modal-row-2">
+            <div className="field">
+              <label className="label">Materia</label>
+              <div className="input-wrap">
+                {materiasList.length > 0 ? (
+                  <><select value={materia} onChange={e => setMateria(e.target.value)}>
+                    {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select><span className="select-arrow"><IconChevron /></span></>
+                ) : (
+                  <input type="text" value={materia} onChange={e => setMateria(e.target.value)} style={{ paddingLeft:'14px' }} />
+                )}
+              </div>
+            </div>
+            <div className="field">
+              <label className="label">Tipo</label>
+              <div className="input-wrap">
+                <select value={tipo} onChange={e => setTipo(e.target.value)}>
+                  {TIPOS_FORM.map(t => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
+                </select>
+                <span className="select-arrow"><IconChevron /></span>
+              </div>
+            </div>
+          </div>
+          <div className="modal-row-2">
+            <div className="field">
+              <label className="label">Fecha</label>
+              <div className="input-wrap">
+                <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={{ paddingLeft:'14px' }} />
+              </div>
+            </div>
+            <div className="field">
+              <label className="label">Hora</label>
+              <div className="input-wrap">
+                <input type="time" value={hora} onChange={e => setHora(e.target.value)} style={{ paddingLeft:'14px' }} />
+              </div>
+            </div>
+          </div>
+          <div className="field">
+            <label className="label">Duración (min)</label>
+            <div className="input-wrap">
+              <input type="number" min="5" step="5" value={duracion}
+                onChange={e => setDuracion(e.target.value)} style={{ paddingLeft:'14px' }} />
+            </div>
+          </div>
+          <button className="btn btn-primary" style={{ width:'100%', padding:'13px 18px' }} onClick={handleSave} disabled={saving}>
+            <IconSave />{saving ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </div>
       </div>
@@ -345,32 +403,93 @@ export default function HomePage() {
   const [user,     setUser]     = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
-  // Tareas (Supabase)
+  // Tareas de hoy
   const [tareas,         setTareas]         = useState([])
   const [loadingTareas,  setLoadingTareas]  = useState(true)
   const [tareaModalOpen, setTareaModalOpen] = useState(false)
   const [tituloTarea,    setTituloTarea]    = useState('')
-  const [materiaTarea,   setMateriaTarea]   = useState('Cálculo diferencial')
+  const [materiaTarea,   setMateriaTarea]   = useState('')
   const [tipoTarea,      setTipoTarea]      = useState('tarea')
   const [fechaTarea,     setFechaTarea]     = useState('')
   const [duracionTarea,  setDuracionTarea]  = useState(30)
   const [horaTarea,      setHoraTarea]      = useState('')
   const [creandoTarea,   setCreandoTarea]   = useState(false)
 
-  // Calendario semanal (Supabase)
-  const [weekTareas,    setWeekTareas]    = useState([])
-  const [loadingWeek,   setLoadingWeek]   = useState(true)
+  // Edit task
+  const [editTareaData, setEditTareaData] = useState(null)
 
-  // Notas (Supabase)
-  const [notas,     setNotas]     = useState([])
+  // Calendario semanal
+  const [weekTareas,  setWeekTareas]  = useState([])
+  const [loadingWeek, setLoadingWeek] = useState(true)
+
+  // Evaluaciones futuras
+  const [upcomingEvals, setUpcomingEvals] = useState([])
+
+  // Alert banner
+  const [dismissedAlert, setDismissedAlert] = useState(false)
+
+  // Notas
+  const [allNotas,  setAllNotas]  = useState([])
+  const [loadNotas, setLoadNotas] = useState(true)
   const [filtro,    setFiltro]    = useState('')
   const [titulo,    setTitulo]    = useState('')
   const [contenido, setContenido] = useState('')
-  const [materia,   setMateria]   = useState('Cálculo diferencial')
+  const [materia,   setMateria]   = useState('')
   const [guardando, setGuardando] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
 
-  // ── Auth ────────────────────────────────────────────────────────────────
+  // ── Computed ──────────────────────────────────────────────────────────────
+  const notasFiltradas = useMemo(
+    () => filtro ? allNotas.filter(n => n.materia === filtro) : allNotas,
+    [allNotas, filtro]
+  )
+
+  const materias = useMemo(() => {
+    const map = {}
+    allNotas.forEach(n => {
+      if (!n.materia) return
+      if (!map[n.materia]) map[n.materia] = { nombre: n.materia, notasCount: 0, nextEval: null }
+      map[n.materia].notasCount++
+    })
+    upcomingEvals.forEach(e => {
+      if (!e.materia) return
+      if (!map[e.materia]) map[e.materia] = { nombre: e.materia, notasCount: 0, nextEval: null }
+      if (!map[e.materia].nextEval) {
+        const d = new Date(e.fecha + 'T12:00:00')
+        const hoy = new Date(); hoy.setHours(0,0,0,0)
+        const daysAway = Math.round((d - hoy) / 86400000)
+        map[e.materia].nextEval = { tipo: e.tipo, titulo: e.titulo, daysAway }
+      }
+    })
+    return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [allNotas, upcomingEvals])
+
+  const materiasList = useMemo(() => materias.map(m => m.nombre), [materias])
+
+  const urgentEval = useMemo(() => {
+    return upcomingEvals.find(e => {
+      const d = new Date(e.fecha + 'T12:00:00')
+      const hoy = new Date(); hoy.setHours(0,0,0,0)
+      const days = Math.round((d - hoy) / 86400000)
+      return days >= 0 && days <= 3
+    })
+  }, [upcomingEvals])
+
+  const firstName = user?.user_metadata?.full_name?.split(' ')[0]
+    || user?.user_metadata?.name?.split(' ')[0]
+    || user?.email?.split('@')[0]
+    || 'Estudiante'
+
+  // ── Sync modal defaults ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (materiasList.length > 0 && !materiaTarea) setMateriaTarea(materiasList[0])
+  }, [materiasList, materiaTarea])
+
+  useEffect(() => {
+    if (materiasList.length > 0 && !materia) setMateria(materiasList[0])
+  }, [materiasList, materia])
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) { router.replace('/login'); return }
@@ -380,121 +499,114 @@ export default function HomePage() {
   }, [router])
 
   useEffect(() => {
-    const h = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false)
-    }
+    const h = e => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  // ── Tareas ──────────────────────────────────────────────────────────────
+  // ── Tareas de hoy ─────────────────────────────────────────────────────────
   const cargarTareas = useCallback(async () => {
     setLoadingTareas(true)
     const { data: { user: u } } = await supabase.auth.getUser()
     if (!u) { setLoadingTareas(false); return }
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = new Date().toISOString().slice(0,10)
     const { data, error } = await supabase
-      .from('tareas')
-      .select('*')
-      .eq('user_id', u.id)
-      .eq('fecha', hoy)
+      .from('tareas').select('*').eq('user_id', u.id).eq('fecha', hoy)
       .order('hora', { ascending: true, nullsFirst: false })
     if (!error) setTareas(data ?? [])
     setLoadingTareas(false)
   }, [])
 
-  useEffect(() => {
-    if (ready) cargarTareas()
-  }, [ready, cargarTareas])
+  useEffect(() => { if (ready) cargarTareas() }, [ready, cargarTareas])
 
+  // ── Calendario ────────────────────────────────────────────────────────────
   const cargarCalendario = useCallback(async () => {
     setLoadingWeek(true)
     const { data: { user: u } } = await supabase.auth.getUser()
     if (!u) { setLoadingWeek(false); return }
     const hoy = new Date()
-    const desde = hoy.toISOString().slice(0, 10)
-    const fin = new Date(hoy)
-    fin.setDate(fin.getDate() + 7)
-    const hasta = fin.toISOString().slice(0, 10)
+    const desde = hoy.toISOString().slice(0,10)
+    const fin = new Date(hoy); fin.setDate(fin.getDate() + 7)
+    const hasta = fin.toISOString().slice(0,10)
     const { data, error } = await supabase
-      .from('tareas')
-      .select('*')
-      .eq('user_id', u.id)
-      .gte('fecha', desde)
-      .lte('fecha', hasta)
+      .from('tareas').select('*').eq('user_id', u.id)
+      .gte('fecha', desde).lte('fecha', hasta)
       .order('fecha', { ascending: true })
       .order('hora', { ascending: true, nullsFirst: false })
     if (!error) setWeekTareas(data ?? [])
     setLoadingWeek(false)
   }, [])
 
-  useEffect(() => {
-    if (ready) cargarCalendario()
-  }, [ready, cargarCalendario])
+  useEffect(() => { if (ready) cargarCalendario() }, [ready, cargarCalendario])
 
+  // ── Evals futuras ─────────────────────────────────────────────────────────
+  const cargarEvals = useCallback(async () => {
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) return
+    const hoy = new Date().toISOString().slice(0,10)
+    const { data, error } = await supabase
+      .from('tareas').select('*').eq('user_id', u.id)
+      .in('tipo', ['prueba','entrega','quiz']).gte('fecha', hoy)
+      .order('fecha', { ascending: true })
+    if (!error) setUpcomingEvals(data ?? [])
+  }, [])
+
+  useEffect(() => { if (ready) cargarEvals() }, [ready, cargarEvals])
+
+  // ── Notas ─────────────────────────────────────────────────────────────────
+  const cargarNotas = useCallback(async () => {
+    setLoadNotas(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setLoadNotas(false); return }
+    const { data, error } = await supabase
+      .from('notas').select('*').eq('user_id', u.id)
+      .order('created_at', { ascending: false })
+    if (!error) setAllNotas(data ?? [])
+    setLoadNotas(false)
+  }, [])
+
+  useEffect(() => { if (ready) cargarNotas() }, [ready, cargarNotas])
+
+  // ── Actions ───────────────────────────────────────────────────────────────
   async function toggleTarea(id, completada) {
-    // Optimistic update
     setTareas(prev => prev.map(t => t.id === id ? { ...t, completada: !completada } : t))
-    const { error } = await supabase
-      .from('tareas')
-      .update({ completada: !completada })
-      .eq('id', id)
-    if (error) {
-      // Revert on failure
-      setTareas(prev => prev.map(t => t.id === id ? { ...t, completada } : t))
-      console.error(error)
-    }
+    const { error } = await supabase.from('tareas').update({ completada: !completada }).eq('id', id)
+    if (error) { setTareas(prev => prev.map(t => t.id === id ? { ...t, completada } : t)); console.error(error) }
+  }
+
+  async function eliminarTarea(id) {
+    if (!window.confirm('¿Eliminar esta tarea?')) return
+    setTareas(prev => prev.filter(t => t.id !== id))
+    const { error } = await supabase.from('tareas').delete().eq('id', id)
+    if (error) { console.error(error); cargarTareas() }
+    else { cargarCalendario(); cargarEvals() }
+  }
+
+  async function actualizarTarea(id, updates) {
+    const { error } = await supabase.from('tareas').update(updates).eq('id', id)
+    if (!error) { setEditTareaData(null); cargarTareas(); cargarCalendario(); cargarEvals() }
+    else console.error(error)
   }
 
   async function crearTarea() {
-    if (!tituloTarea.trim()) { alert('Agrega un título a la tarea'); return }
+    if (!tituloTarea.trim()) return
     setCreandoTarea(true)
     const { data: { user: u } } = await supabase.auth.getUser()
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = new Date().toISOString().slice(0,10)
     const fechaFinal = fechaTarea || hoy
     const { error } = await supabase.from('tareas').insert({
-      user_id:      u.id,
-      titulo:       tituloTarea.trim(),
-      materia:      materiaTarea,
-      tipo:         tipoTarea,
-      duracion_min: Number(duracionTarea) || 30,
-      hora:         horaTarea || null,
-      completada:   false,
-      fecha:        fechaFinal,
+      user_id: u.id, titulo: tituloTarea.trim(), materia: materiaTarea,
+      tipo: tipoTarea, duracion_min: Number(duracionTarea) || 30,
+      hora: horaTarea || null, completada: false, fecha: fechaFinal,
     })
     if (!error) {
-      setTituloTarea('')
-      setMateriaTarea('Cálculo diferencial')
-      setTipoTarea('tarea')
-      setFechaTarea('')
-      setDuracionTarea(30)
-      setHoraTarea('')
+      setTituloTarea(''); setTipoTarea('tarea')
+      setFechaTarea(''); setDuracionTarea(30); setHoraTarea('')
       setTareaModalOpen(false)
       if (fechaFinal === hoy) cargarTareas()
-      cargarCalendario()
-    } else {
-      console.error(error)
-    }
+      cargarCalendario(); cargarEvals()
+    } else console.error(error)
     setCreandoTarea(false)
-  }
-
-  // ── Notas ───────────────────────────────────────────────────────────────
-  const cargarNotas = useCallback(async (materiaFiltro) => {
-    const { data: { user: u } } = await supabase.auth.getUser()
-    if (!u) return
-    let q = supabase.from('notas').select('*').eq('user_id', u.id).order('created_at', { ascending: false })
-    if (materiaFiltro) q = q.eq('materia', materiaFiltro)
-    const { data, error } = await q
-    if (!error) setNotas(data ?? [])
-  }, [])
-
-  useEffect(() => {
-    if (ready) cargarNotas('')
-  }, [ready, cargarNotas])
-
-  function cambiarFiltro(valor) {
-    setFiltro(valor)
-    cargarNotas(valor)
   }
 
   async function guardarNota() {
@@ -502,9 +614,16 @@ export default function HomePage() {
     setGuardando(true)
     const { data: { user: u } } = await supabase.auth.getUser()
     const { error } = await supabase.from('notas').insert({ titulo, contenido, materia, user_id: u.id })
-    if (!error) { setTitulo(''); setContenido(''); setModalOpen(false); cargarNotas(filtro) }
+    if (!error) { setTitulo(''); setContenido(''); setModalOpen(false); cargarNotas() }
     else console.error(error)
     setGuardando(false)
+  }
+
+  async function eliminarNota(id) {
+    if (!window.confirm('¿Eliminar esta nota?')) return
+    setAllNotas(prev => prev.filter(n => n.id !== id))
+    const { error } = await supabase.from('notas').delete().eq('id', id)
+    if (error) { console.error(error); cargarNotas() }
   }
 
   async function cerrarSesion() {
@@ -516,33 +635,48 @@ export default function HomePage() {
 
   const remaining    = tareas.filter(t => !t.completada).length
   const totalMinutes = tareas.filter(t => !t.completada).reduce((s, t) => s + (t.duracion_min || 0), 0)
-  const todayStr     = new Date().toISOString().slice(0, 10)
-  const thisWeekTests = weekTareas.filter(t => ['prueba', 'quiz'].includes(t.tipo)).length
+  const todayStr     = new Date().toISOString().slice(0,10)
+  const thisWeekTests= weekTareas.filter(t => ['prueba','quiz'].includes(t.tipo)).length
+  const weekDays     = [...new Set(weekTareas.map(t => t.fecha))].sort()
 
-  // Agrupar weekTareas por fecha
-  const weekDays = [...new Set(weekTareas.map(t => t.fecha))].sort()
   function weekDayLabel(fecha) {
     const d = new Date(fecha + 'T12:00:00')
     return { wd: WEEKDAYS_ES[d.getDay()], day: d.getDate() }
   }
 
+  function urgentDays(e) {
+    const d = new Date(e.fecha + 'T12:00:00')
+    const hoy = new Date(); hoy.setHours(0,0,0,0)
+    return Math.round((d - hoy) / 86400000)
+  }
+
   return (
     <>
-      <Topbar
-        user={user}
-        menuOpen={menuOpen}
-        setMenuOpen={setMenuOpen}
-        menuRef={menuRef}
-        onLogout={cerrarSesion}
-      />
+      <Topbar user={user} menuOpen={menuOpen} setMenuOpen={setMenuOpen} menuRef={menuRef} onLogout={cerrarSesion} />
 
       <main className="dash-body">
+
+        {/* Alert banner */}
+        {urgentEval && !dismissedAlert && (
+          <div className="alert-banner">
+            <span className="alert-icon">⚡</span>
+            <span>
+              Tienes una <strong>{TIPO_LABEL[urgentEval.tipo]}</strong> de <strong>{urgentEval.materia}</strong>{' '}
+              {daysLabel(urgentDays(urgentEval)).toLowerCase() === 'hoy'
+                ? <><strong>hoy</strong>.</>
+                : <>en <strong>{urgentDays(urgentEval)} {urgentDays(urgentEval) === 1 ? 'día' : 'días'}</strong>.</>
+              }
+            </span>
+            <button className="alert-dismiss" onClick={() => setDismissedAlert(true)}>×</button>
+          </div>
+        )}
+
         {/* Hero */}
         <header className="hero">
           <div>
             <div className="hero-date">{formatDateLong()}</div>
             <h1 className="hero-title">
-              Hola, André.{' '}
+              Hola, {firstName}.{' '}
               <span className="hero-accent">
                 Esta semana tienes <strong>{thisWeekTests} evaluaciones</strong> y{' '}
                 {remaining} {remaining === 1 ? 'tarea' : 'tareas'} pendientes para hoy.
@@ -553,7 +687,7 @@ export default function HomePage() {
 
         <div className="dash-grid">
 
-          {/* ── Left column ─────────────────────────────────────────────── */}
+          {/* ── Left column ───────────────────────────────────────────────── */}
           <div className="dash-left">
 
             {/* Hoy */}
@@ -562,7 +696,7 @@ export default function HomePage() {
                 <h2 className="section-title">Hoy</h2>
                 {!loadingTareas && tareas.length > 0 && (
                   <span className="link-mini">
-                    {remaining} pendiente{remaining !== 1 ? 's' : ''} · {Math.round(totalMinutes / 60 * 10) / 10}h estimadas
+                    {remaining} pendiente{remaining !== 1 ? 's' : ''} · {Math.round(totalMinutes/60*10)/10}h estimadas
                   </span>
                 )}
                 <button className="btn btn-ghost xs" onClick={() => setTareaModalOpen(true)}>
@@ -570,42 +704,37 @@ export default function HomePage() {
                 </button>
               </div>
 
-              {loadingTareas ? (
-                <p className="task-loading">Cargando tareas…</p>
-              ) : tareas.length === 0 ? (
+              {loadingTareas ? <SkeletonTasks /> : tareas.length === 0 ? (
                 <div className="task-empty">
-                  <span>No tienes tareas para hoy.</span>
-                  <button className="link-mini" onClick={() => setTareaModalOpen(true)}>
-                    + Agregar una
-                  </button>
+                  <span>¡Sin tareas para hoy!</span>
+                  <button className="link-mini" onClick={() => setTareaModalOpen(true)}>+ Agregar una</button>
                 </div>
               ) : (
                 <ul className="task-list">
                   {tareas.map(t => {
-                    const s = subjectByMateria(t.materia)
+                    const color = materiaColor(t.materia)
                     return (
                       <li key={t.id} className={`task ${t.completada ? 'task-done' : ''}`}>
-                        <button
-                          className={`tcheck ${t.completada ? 'checked' : ''}`}
-                          onClick={() => toggleTarea(t.id, t.completada)}
-                          aria-label="Marcar tarea"
-                        >
+                        <button className={`tcheck ${t.completada ? 'checked' : ''}`}
+                          onClick={() => toggleTarea(t.id, t.completada)} aria-label="Marcar">
                           {t.completada && <IconCheck />}
                         </button>
-                        <div className="task-main">
+                        <div className="task-main" onClick={() => !t.completada && setEditTareaData(t)}>
                           <div className="task-title">{t.titulo}</div>
                           <div className="task-meta">
-                            {s && <span className={`dot dot-${s.color}`} />}
+                            <span className={`dot dot-${color}`} />
                             <span>{t.materia}</span>
+                            {t.tipo && t.tipo !== 'tarea' && (
+                              <><span className="meta-sep">·</span>
+                              <span className={`pill pill-${TIPO_PILL[t.tipo]}`} style={{fontSize:10,padding:'1px 7px'}}>{TIPO_LABEL[t.tipo]}</span></>
+                            )}
                             {t.duracion_min && (
-                              <>
-                                <span className="meta-sep">·</span>
-                                <span>{t.duracion_min} min</span>
-                              </>
+                              <><span className="meta-sep">·</span><span>{t.duracion_min} min</span></>
                             )}
                           </div>
                         </div>
-                        {t.hora && <span className="task-time">{t.hora}</span>}
+                        {t.hora && <span className="task-time">{t.hora.slice(0,5)}</span>}
+                        <button className="task-del-btn" onClick={() => eliminarTarea(t.id)} title="Eliminar">×</button>
                       </li>
                     )
                   })}
@@ -617,17 +746,21 @@ export default function HomePage() {
             <section>
               <div className="section-head">
                 <h2 className="section-title">Materias</h2>
-                <span className="link-mini">{SUBJECTS.length} asignaturas</span>
+                <span className="link-mini">{materias.length} asignatura{materias.length !== 1 ? 's' : ''}</span>
               </div>
-              <div className="subjects-grid">
-                {SUBJECTS.map(s => (
-                  <SubjectCard
-                    key={s.code}
-                    subject={s}
-                    notasCount={notas.filter(n => n.materia === s.materia).length}
-                  />
-                ))}
-              </div>
+              {loadNotas && materias.length === 0 ? <SkeletonCards /> : materias.length === 0 ? (
+                <EmptyState
+                  title="Sin materias todavía"
+                  sub="Crea tu primera nota o tarea y tus materias aparecerán aquí automáticamente."
+                />
+              ) : (
+                <div className="subjects-grid">
+                  {materias.map(m => (
+                    <SubjectCard key={m.nombre} materia={m}
+                      onClick={() => router.push(`/materia/${encodeURIComponent(m.nombre)}`)} />
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* Mis notas */}
@@ -638,44 +771,46 @@ export default function HomePage() {
                   <IconPlus /> Nueva
                 </button>
               </div>
-              <div className="filter-row">
-                {FILTROS.map(f => (
-                  <button
-                    key={f.value}
-                    className={`filter-btn${filtro === f.value ? ' activo' : ''}`}
-                    onClick={() => cambiarFiltro(f.value)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-              {notas.length === 0 ? (
+
+              {allNotas.length > 0 && (
+                <div className="filter-row">
+                  <button className={`filter-btn${filtro === '' ? ' activo' : ''}`} onClick={() => setFiltro('')}>Todas</button>
+                  {materiasList.map(m => (
+                    <button key={m} className={`filter-btn${filtro === m ? ' activo' : ''}`}
+                      onClick={() => setFiltro(filtro === m ? '' : m)}>{m}</button>
+                  ))}
+                </div>
+              )}
+
+              {loadNotas ? <SkeletonNotes /> : notasFiltradas.length === 0 ? (
                 <EmptyState
-                  title="Sin notas aún"
-                  sub="Usa el botón Nueva o el FAB para crear tu primera nota."
+                  title={allNotas.length === 0 ? "Aún no tienes notas" : "Sin notas en esta materia"}
+                  sub={allNotas.length === 0
+                    ? "Usa el botón Nueva o el FAB verde para guardar tu primer apunte."
+                    : "Agrega notas a esta materia desde el botón Nueva."}
                 />
               ) : (
                 <div className="notes-tab">
                   <div className="notes-head">
-                    <div className="files-label">{notas.length} nota{notas.length !== 1 ? 's' : ''}</div>
+                    <div className="files-label">{notasFiltradas.length} nota{notasFiltradas.length !== 1 ? 's' : ''}</div>
                   </div>
                   <div className="notes-grid">
-                    {notas.map(nota => (
-                      <article key={nota.id} className="note-card">
+                    {notasFiltradas.map(nota => (
+                      <article key={nota.id} className="note-card"
+                        onClick={() => router.push(`/materia/${encodeURIComponent(nota.materia || '')}`)}>
                         <div className="note-top">
-                          <span className={`pill pill-${SUBJECT_COLOR[nota.materia] || ''}`}>
+                          <span className={`pill pill-${materiaColor(nota.materia)}`}>
                             {nota.materia || 'Sin materia'}
                           </span>
+                          <button className="note-del-btn"
+                            onClick={e => { e.stopPropagation(); eliminarNota(nota.id) }}
+                            title="Eliminar nota">×</button>
                         </div>
                         <h3 className="note-title">{nota.titulo}</h3>
                         <p className="note-body">{nota.contenido}</p>
                         <div className="note-foot">
-                          <span className="note-date">
-                            <IconCalendar />{' '}{formatDate(nota.created_at)}
-                          </span>
-                          <span className="note-action">
-                            <IconFileText /> Abrir →
-                          </span>
+                          <span className="note-date"><IconCalendar /> {formatDate(nota.created_at)}</span>
+                          <span className="note-action"><IconFileText /> Abrir →</span>
                         </div>
                       </article>
                     ))}
@@ -686,7 +821,7 @@ export default function HomePage() {
 
           </div>
 
-          {/* ── Right column ────────────────────────────────────────────── */}
+          {/* ── Right column ──────────────────────────────────────────────── */}
           <aside className="dash-right">
             <section className="card">
               <div className="card-head">
@@ -696,16 +831,14 @@ export default function HomePage() {
                     {loadingWeek ? 'Cargando…' : `${weekTareas.length} evento${weekTareas.length !== 1 ? 's' : ''} próximos`}
                   </div>
                 </div>
-                <button className="icon-btn sm" title="Ver calendario">
-                  <IconCalendar />
-                </button>
+                <button className="icon-btn sm"><IconCalendar /></button>
               </div>
               {loadingWeek ? (
-                <p className="task-loading">Cargando calendario…</p>
+                <div className="skeleton-list">{[1,2].map(i=><div key={i} className="skeleton-task" style={{height:70}}/>)}</div>
               ) : weekTareas.length === 0 ? (
-                <div className="task-empty">
-                  <span>Sin eventos los próximos 7 días.</span>
-                  <button className="link-mini" onClick={() => setTareaModalOpen(true)}>+ Agregar una</button>
+                <div className="task-empty" style={{flexDirection:'column',alignItems:'flex-start',gap:6}}>
+                  <span style={{color:'var(--ink-3)'}}>¡Sin evaluaciones próximas!</span>
+                  <button className="link-mini" onClick={() => setTareaModalOpen(true)}>+ Agregar una tarea</button>
                 </div>
               ) : (
                 <ul className="week-list">
@@ -714,33 +847,23 @@ export default function HomePage() {
                     const isToday = fecha === todayStr
                     const eventos = weekTareas.filter(t => t.fecha === fecha)
                     return eventos.map((ev, i) => {
-                      const s = subjectByMateria(ev.materia)
+                      const color     = materiaColor(ev.materia)
                       const pillColor = TIPO_PILL[ev.tipo] || 'c'
                       return (
                         <li key={ev.id} className={`wk ${isToday ? 'wk-today' : ''}`}>
                           <div className="wk-date">
-                            {i === 0 ? (
-                              <>
-                                <div className="wk-wd">{wd}</div>
-                                <div className="wk-d">{String(day).padStart(2, '0')}</div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="wk-wd" />
-                                <div className="wk-d" />
-                              </>
-                            )}
+                            {i === 0
+                              ? <><div className="wk-wd">{wd}</div><div className="wk-d">{String(day).padStart(2,'0')}</div></>
+                              : <><div className="wk-wd"/><div className="wk-d"/></>
+                            }
                           </div>
                           <div className="wk-body">
                             <div className="wk-row">
                               <span className={`pill pill-${pillColor}`}>{TIPO_LABEL[ev.tipo] || ev.tipo}</span>
-                              {ev.hora && <span className="wk-time">{ev.hora.slice(0, 5)}</span>}
+                              {ev.hora && <span className="wk-time">{ev.hora.slice(0,5)}</span>}
                             </div>
                             <div className="wk-title">{ev.titulo}</div>
-                            <div className="wk-sub">
-                              {s && <span className={`dot dot-${s.color}`} />}
-                              {ev.materia}
-                            </div>
+                            <div className="wk-sub"><span className={`dot dot-${color}`}/>{ev.materia}</div>
                           </div>
                         </li>
                       )
@@ -756,44 +879,36 @@ export default function HomePage() {
 
       {/* FAB */}
       <button className="fab" onClick={() => setModalOpen(true)}>
-        <IconPlus />
-        <span>Nueva nota</span>
+        <IconPlus /><span>Nueva nota</span>
       </button>
 
-      {/* Note Modal */}
+      {/* Note modal */}
       {modalOpen && (
-        <NoteModal
-          onClose={() => setModalOpen(false)}
-          onSave={guardarNota}
-          materia={materia}
-          setMateria={setMateria}
-          titulo={titulo}
-          setTitulo={setTitulo}
-          contenido={contenido}
-          setContenido={setContenido}
-          guardando={guardando}
-        />
+        <NoteModal onClose={() => setModalOpen(false)} onSave={guardarNota}
+          materia={materia} setMateria={setMateria}
+          titulo={titulo} setTitulo={setTitulo}
+          contenido={contenido} setContenido={setContenido}
+          guardando={guardando} materiasList={materiasList} />
       )}
 
-      {/* Task Modal */}
+      {/* Create task modal */}
       {tareaModalOpen && (
-        <TareaModal
-          onClose={() => setTareaModalOpen(false)}
-          onSave={crearTarea}
-          titulo={tituloTarea}
-          setTitulo={setTituloTarea}
-          materia={materiaTarea}
-          setMateria={setMateriaTarea}
-          tipo={tipoTarea}
-          setTipo={setTipoTarea}
-          fecha={fechaTarea}
-          setFecha={setFechaTarea}
-          duracion={duracionTarea}
-          setDuracion={setDuracionTarea}
-          hora={horaTarea}
-          setHora={setHoraTarea}
-          creando={creandoTarea}
-        />
+        <TareaModal onClose={() => setTareaModalOpen(false)} onSave={crearTarea}
+          titulo={tituloTarea} setTitulo={setTituloTarea}
+          materia={materiaTarea} setMateria={setMateriaTarea}
+          tipo={tipoTarea} setTipo={setTipoTarea}
+          fecha={fechaTarea} setFecha={setFechaTarea}
+          duracion={duracionTarea} setDuracion={setDuracionTarea}
+          hora={horaTarea} setHora={setHoraTarea}
+          creando={creandoTarea} materiasList={materiasList} />
+      )}
+
+      {/* Edit task modal */}
+      {editTareaData && (
+        <EditTareaModal tarea={editTareaData}
+          onClose={() => setEditTareaData(null)}
+          onSave={updates => actualizarTarea(editTareaData.id, updates)}
+          materiasList={materiasList} />
       )}
     </>
   )
