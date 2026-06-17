@@ -628,6 +628,11 @@ h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 500; letter-spacin
 
 .urgent-text { color: var(--accent); font-weight: 500; font-size: 12px; font-family: var(--font-mono); }
 
+/* Module item links */
+.mod-item-link:hover { text-decoration: underline; color: var(--accent); }
+details summary::-webkit-details-marker { display: none; }
+details[open] summary span:last-child { transform: rotate(90deg); display: inline-block; }
+
 /* ============ Sidebar ============ */
 .sidebar {
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 20;

@@ -4,21 +4,30 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/AppShell'
+import {
+  getCourseFiles, getCourseModules, getAssignmentsWithSubmissions,
+  getCourseAnnouncements, loadCanvasConfig,
+} from '@/lib/canvas'
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
-function IconBook()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
-function IconSearch()   { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg> }
-function IconBell()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> }
-function IconChevron()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg> }
-function IconLogout()   { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg> }
-function IconPlus()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg> }
-function IconSave()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> }
-function IconCalendar() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg> }
-function IconFileText() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg> }
-function IconCheck()    { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg> }
-function IconX()        { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> }
-function IconArrowLeft(){ return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> }
-function IconSparkle()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M5 3l.75 2.25L8 6l-2.25.75L5 9l-.75-2.25L2 6l2.25-.75z"/></svg> }
+// ── Icons ──────────────────────────────────────────────────────────────────────
+function IconBook()      { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
+function IconCalendar()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg> }
+function IconFileText()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg> }
+function IconFolder()    { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> }
+function IconBell()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> }
+function IconStar()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> }
+function IconGrades()    { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> }
+function IconCheck()     { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg> }
+function IconChevron()   { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg> }
+function IconX()         { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> }
+function IconArrowLeft() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg> }
+function IconSparkle()   { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M5 3l.75 2.25L8 6l-2.25.75L5 9l-.75-2.25L2 6l2.25-.75z"/></svg> }
+function IconPlus()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg> }
+function IconSave()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> }
+function IconDownload()  { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> }
+function IconEye()       { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> }
+function IconMod()       { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> }
+function IconStarFill()  { return <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(iso) {
@@ -33,6 +42,16 @@ function formatShort(iso) {
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
   return `${d.getDate()} ${months[d.getMonth()]}`
 }
+function formatAnnouncementDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const days = Math.round((Date.now() - d) / 86400000)
+  if (days === 0) return 'Hoy'
+  if (days === 1) return 'Ayer'
+  if (days < 7) return `Hace ${days} días`
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
+}
 function daysLabel(n) {
   if (n < 0)  return 'Pasado'
   if (n === 0) return 'Hoy'
@@ -45,6 +64,49 @@ function materiaColor(nombre) {
   let hash = 0
   for (let i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) & 0xFFFF
   return palette[hash % palette.length]
+}
+function formatFileSize(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+function fileIcon(mimeClass, contentType) {
+  const cls = (mimeClass || '').toLowerCase()
+  const ct  = (contentType || '').toLowerCase()
+  if (cls === 'pdf' || ct.includes('pdf')) return '📄'
+  if (cls === 'image' || ct.includes('image')) return '🖼️'
+  if (cls === 'video' || ct.includes('video')) return '🎬'
+  if (cls === 'audio' || ct.includes('audio')) return '🎵'
+  if (ct.includes('word') || ct.includes('document')) return '📝'
+  if (ct.includes('sheet') || ct.includes('excel')) return '📊'
+  if (ct.includes('presentation') || ct.includes('powerpoint')) return '📊'
+  if (ct.includes('zip') || ct.includes('rar') || ct.includes('compressed')) return '🗜️'
+  return '📁'
+}
+function isPdf(f) {
+  return f.mime_class === 'pdf' || (f['content-type'] || '').includes('pdf')
+}
+function isSyllabus(name) {
+  const n = (name || '').toLowerCase()
+  return n.includes('programa') || n.includes('syllabus') || n.includes('cronograma') ||
+    n.includes('planificaci') || n.includes('schedule') || n.includes('guia') || n.includes('guía')
+}
+function stripHtml(html) {
+  return (html || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ').trim()
+}
+function moduleItemIcon(type) {
+  const map = { File:'📄', Assignment:'📝', Discussion:'💬', Quiz:'❓', ExternalUrl:'🔗', Page:'📖' }
+  return map[type] || '📌'
+}
+function handleCanvasError(err) {
+  const msg = err?.message || ''
+  if (msg.includes('401') || msg.includes('403')) return 'Token inválido. Actualiza tu token en Configuración.'
+  if (msg.includes('fetch') || msg.includes('Failed') || msg.includes('network')) return 'Canvas no responde. Verifica tu conexión.'
+  return msg || 'Error al cargar datos de Canvas.'
 }
 
 const TIPO_PILL  = { tarea:'c', prueba:'d', entrega:'a', lectura:'b', quiz:'e' }
@@ -60,54 +122,32 @@ function SkeletonTasks() {
 }
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
-function EmptyState({ title, sub }) {
+function EmptyState({ title, sub, children }) {
   return (
     <div className="empty">
       <div className="empty-art"><div className="empty-doc"/><div className="empty-doc"/><div className="empty-doc front"/></div>
       <div className="empty-title">{title}</div>
       <div className="empty-sub">{sub}</div>
+      {children}
     </div>
   )
 }
 
-// ── Topbar ────────────────────────────────────────────────────────────────────
-function Topbar({ user, menuOpen, setMenuOpen, menuRef, onLogout, crumb }) {
-  const initial     = user?.email ? user.email[0].toUpperCase() : 'U'
-  const displayName = user?.user_metadata?.full_name?.split(' ')[0]
-    || user?.user_metadata?.name?.split(' ')[0]
-    || user?.email?.split('@')[0] || 'Estudiante'
+// ── Canvas error block ────────────────────────────────────────────────────────
+function CanvasError({ msg, onRetry, router }) {
   return (
-    <header className="topbar">
-      <div className="topbar-inner">
-        <div className="brand-row">
-          <div className="brand-mark sm"><IconBook /></div>
-          <div className="brand-name sm">Aula</div>
-          {crumb && <><span className="crumb-sep">/</span><span className="crumb">{crumb}</span></>}
-        </div>
-        <div className="topbar-actions">
-          <div className="search-mini"><IconSearch /><input placeholder="Buscar…" readOnly /><span className="kbd">⌘K</span></div>
-          <button className="icon-btn"><IconBell /><span className="dot-badge"/></button>
-          <div className="user-menu" ref={menuRef}>
-            <button className="avatar-btn" onClick={() => setMenuOpen(o => !o)}>
-              <span className="avatar">{initial}</span>
-              <span className="user-name">{displayName}</span>
-              <IconChevron />
-            </button>
-            {menuOpen && (
-              <div className="menu-pop">
-                <div className="menu-head">
-                  <div className="menu-name">{displayName}</div>
-                  <div className="menu-mail">{user?.email}</div>
-                </div>
-                <button className="menu-item">Mi perfil</button>
-                <div className="menu-sep"/>
-                <button className="menu-item danger" onClick={onLogout}><IconLogout /> Cerrar sesión</button>
-              </div>
-            )}
-          </div>
-        </div>
+    <div className="empty" style={{ paddingTop:32 }}>
+      <div className="empty-title" style={{ fontSize:15 }}>Sin acceso al contenido</div>
+      <div className="empty-sub">{msg}</div>
+      <div style={{ display:'flex', gap:8, marginTop:16 }}>
+        {onRetry && <button className="btn btn-ghost sm" onClick={onRetry}>Reintentar</button>}
+        {(msg.includes('Token') || msg.includes('Configura')) && (
+          <button className="btn btn-primary sm" onClick={() => router.push('/configuracion')}>
+            Ir a Configuración
+          </button>
+        )}
       </div>
-    </header>
+    </div>
   )
 }
 
@@ -157,10 +197,6 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, tipo, setTipo, fecha, 
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [onClose])
-  function handleSave() {
-    if (!titulo.trim()) { setError('El título es obligatorio'); return }
-    setError(''); onSave()
-  }
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
@@ -210,7 +246,7 @@ function TareaModal({ onClose, onSave, titulo, setTitulo, tipo, setTipo, fecha, 
               </div>
             </div>
           </div>
-          <button className="btn btn-primary" style={{width:'100%',padding:'13px 18px'}} onClick={handleSave} disabled={creando}>
+          <button className="btn btn-primary" style={{width:'100%',padding:'13px 18px'}} onClick={onSave} disabled={creando}>
             <IconSave />{creando ? 'Guardando…' : 'Agregar tarea'}
           </button>
         </div>
@@ -228,13 +264,11 @@ function EditTareaModal({ onClose, onSave, tarea }) {
   const [duracion, setDuracion] = useState(tarea.duracion_min || 30)
   const [error,    setError]    = useState('')
   const [saving,   setSaving]   = useState(false)
-
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [onClose])
-
   async function handleSave() {
     if (!titulo.trim()) { setError('El título es obligatorio'); return }
     setSaving(true)
@@ -299,6 +333,40 @@ function EditTareaModal({ onClose, onSave, tarea }) {
   )
 }
 
+// ── PDF Preview modal ─────────────────────────────────────────────────────────
+function PdfModal({ file, onClose }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+  return (
+    <div className="modal-overlay" style={{ zIndex:1100 }} onClick={e => { if(e.target===e.currentTarget) onClose() }}>
+      <div className="modal" style={{ width:'92vw', maxWidth:960, height:'88vh', padding:0, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+        <div className="modal-head" style={{ padding:'10px 16px', flexShrink:0 }}>
+          <div style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'70%' }}>
+            {file.display_name || file.filename}
+          </div>
+          <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+            {file.url && (
+              <a href={file.url} target="_blank" rel="noopener noreferrer" download={file.filename || file.display_name}
+                className="btn btn-ghost xs" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:4 }}>
+                <IconDownload /> Descargar
+              </a>
+            )}
+            <button className="modal-close" onClick={onClose}><IconX /></button>
+          </div>
+        </div>
+        <iframe
+          src={file.url}
+          title={file.display_name}
+          style={{ flex:1, border:'none', display:'block', width:'100%' }}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function MateriaPage() {
   const router  = useRouter()
@@ -309,16 +377,19 @@ export default function MateriaPage() {
 
   const [ready,    setReady]    = useState(false)
   const [user,     setUser]     = useState(null)
-  const [menuOpen, setMenuOpen] = useState(false)
   const [tab,      setTab]      = useState('notas')
 
+  // Materia (includes canvas_id)
+  const [canvasId,     setCanvasId]     = useState(null)
+  const [canvasConfig, setCanvasConfig] = useState(null)
+
   // Notas
-  const [notas,      setNotas]      = useState([])
-  const [loadNotas,  setLoadNotas]  = useState(true)
-  const [noteModal,  setNoteModal]  = useState(false)
-  const [noteTitulo, setNoteTitulo] = useState('')
-  const [noteContenido, setNoteContenido] = useState('')
-  const [guardando,  setGuardando]  = useState(false)
+  const [notas,        setNotas]        = useState([])
+  const [loadNotas,    setLoadNotas]    = useState(true)
+  const [noteModal,    setNoteModal]    = useState(false)
+  const [noteTitulo,   setNoteTitulo]   = useState('')
+  const [noteContenido,setNoteContenido]= useState('')
+  const [guardando,    setGuardando]    = useState(false)
 
   // Tareas
   const [tareas,     setTareas]     = useState([])
@@ -332,6 +403,35 @@ export default function MateriaPage() {
   const [tDuracion,  setTDuracion]  = useState(30)
   const [creando,    setCreando]    = useState(false)
 
+  // Calificaciones de Supabase (para badges en tareas)
+  const [califDB, setCalifDB] = useState([])
+
+  // ── Lazy-loaded tabs ───────────────────────────────────────────────────────
+  // Material (files + modules)
+  const [archivos,       setArchivos]       = useState([])
+  const [modulos,        setModulos]        = useState([])
+  const [loadMaterial,   setLoadMaterial]   = useState(false)
+  const [materialError,  setMaterialError]  = useState('')
+  const [materialLoaded, setMaterialLoaded] = useState(false)
+
+  // Calificaciones desde Canvas
+  const [canvasGrades,   setCanvasGrades]   = useState([])
+  const [loadGrades,     setLoadGrades]     = useState(false)
+  const [gradesError,    setGradesError]    = useState('')
+  const [gradesLoaded,   setGradesLoaded]   = useState(false)
+
+  // Anuncios desde Canvas
+  const [anuncios,       setAnuncios]       = useState([])
+  const [loadAnuncios,   setLoadAnuncios]   = useState(false)
+  const [anunciosError,  setAnunciosError]  = useState('')
+  const [anunciosLoaded, setAnunciosLoaded] = useState(false)
+
+  // PDF preview
+  const [pdfFile, setPdfFile] = useState(null)
+
+  // Guards: prevent double-loading per tab
+  const loadGuard = useRef({ material: false, grades: false, anuncios: false })
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -342,12 +442,12 @@ export default function MateriaPage() {
   }, [router])
 
   useEffect(() => {
-    const h = e => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false) }
+    const h = e => { if (menuRef.current && !menuRef.current.contains(e.target)) {} }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  // ── Data ──────────────────────────────────────────────────────────────────
+  // ── Data from Supabase ────────────────────────────────────────────────────
   const cargarNotas = useCallback(async () => {
     setLoadNotas(true)
     const { data: { user: u } } = await supabase.auth.getUser()
@@ -371,7 +471,85 @@ export default function MateriaPage() {
     setLoadTareas(false)
   }, [nombre])
 
-  useEffect(() => { if (ready) { cargarNotas(); cargarTareas() } }, [ready, cargarNotas, cargarTareas])
+  const cargarCalifDB = useCallback(async () => {
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) return
+    const { data } = await supabase
+      .from('calificaciones').select('*')
+      .eq('user_id', u.id).eq('materia', nombre)
+    if (data) setCalifDB(data)
+  }, [nombre])
+
+  useEffect(() => {
+    if (!ready || !user) return
+    // Load canvas_id
+    supabase.from('materias').select('canvas_id')
+      .eq('user_id', user.id).eq('nombre', nombre).maybeSingle()
+      .then(({ data }) => { if (data?.canvas_id) setCanvasId(data.canvas_id) })
+    // Load Canvas credentials
+    loadCanvasConfig(supabase, user.id).then(cfg => { if (cfg) setCanvasConfig(cfg) })
+    // Load DB data
+    cargarNotas(); cargarTareas(); cargarCalifDB()
+  }, [ready, user, nombre, cargarNotas, cargarTareas, cargarCalifDB])
+
+  // ── Canvas lazy loaders ───────────────────────────────────────────────────
+  async function doLoadMaterial(courseId) {
+    if (loadGuard.current.material) return
+    loadGuard.current.material = true
+    setLoadMaterial(true); setMaterialError('')
+    try {
+      const [files, mods] = await Promise.all([
+        getCourseFiles(canvasConfig.url, canvasConfig.token, courseId),
+        getCourseModules(canvasConfig.url, canvasConfig.token, courseId),
+      ])
+      setArchivos(Array.isArray(files) ? files : [])
+      setModulos(Array.isArray(mods) ? mods : [])
+      setMaterialLoaded(true)
+    } catch (err) {
+      loadGuard.current.material = false
+      setMaterialError(handleCanvasError(err))
+    }
+    setLoadMaterial(false)
+  }
+
+  async function doLoadGrades(courseId) {
+    if (loadGuard.current.grades) return
+    loadGuard.current.grades = true
+    setLoadGrades(true); setGradesError('')
+    try {
+      const data = await getAssignmentsWithSubmissions(canvasConfig.url, canvasConfig.token, courseId)
+      setCanvasGrades(Array.isArray(data) ? data : [])
+      setGradesLoaded(true)
+    } catch (err) {
+      loadGuard.current.grades = false
+      setGradesError(handleCanvasError(err))
+    }
+    setLoadGrades(false)
+  }
+
+  async function doLoadAnuncios(courseId) {
+    if (loadGuard.current.anuncios) return
+    loadGuard.current.anuncios = true
+    setLoadAnuncios(true); setAnunciosError('')
+    try {
+      const data = await getCourseAnnouncements(canvasConfig.url, canvasConfig.token, courseId)
+      setAnuncios(Array.isArray(data) ? data : [])
+      setAnunciosLoaded(true)
+    } catch (err) {
+      loadGuard.current.anuncios = false
+      setAnunciosError(handleCanvasError(err))
+    }
+    setLoadAnuncios(false)
+  }
+
+  // Trigger lazy load when tab or canvas data changes
+  useEffect(() => {
+    if (!canvasId || !canvasConfig) return
+    if (tab === 'material'       && !materialLoaded)  doLoadMaterial(canvasId)
+    if (tab === 'calificaciones' && !gradesLoaded)    doLoadGrades(canvasId)
+    if (tab === 'anuncios'       && !anunciosLoaded)  doLoadAnuncios(canvasId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, canvasId, canvasConfig?.url])
 
   // ── Actions ───────────────────────────────────────────────────────────────
   async function guardarNota() {
@@ -429,22 +607,53 @@ export default function MateriaPage() {
     else console.error(error)
   }
 
-  async function cerrarSesion() {
-    await supabase.auth.signOut()
-    router.replace('/login')
-  }
-
   if (!ready) return null
 
   const todayStr   = new Date().toISOString().slice(0,10)
   const tareasVig  = tareas.filter(t => t.fecha >= todayStr).sort((a,b) => a.fecha.localeCompare(b.fecha))
   const tareasPast = tareas.filter(t => t.fecha < todayStr).sort((a,b) => b.fecha.localeCompare(a.fecha))
 
+  const califMap = {}
+  califDB.forEach(c => { if (c.canvas_id) califMap[c.canvas_id] = c })
+
+  const promedioCalif = califDB.length > 0
+    ? Math.round(califDB.reduce((s, c) => s + (c.nota_maxima > 0 ? (c.nota / c.nota_maxima) * 100 : 0), 0) / califDB.length)
+    : null
+
   function daysAway(fecha) {
     const d = new Date(fecha + 'T12:00:00')
     const hoy = new Date(); hoy.setHours(0,0,0,0)
     return Math.round((d - hoy) / 86400000)
   }
+
+  function gradeBadge(tarea) {
+    const c = califMap[tarea.canvas_assignment_id]
+    if (!c) return null
+    const pct = c.nota_maxima > 0 ? Math.round((c.nota / c.nota_maxima) * 100) : null
+    if (pct == null) return null
+    return (
+      <span style={{
+        display:'inline-flex', alignItems:'center', gap:3,
+        fontSize:11, padding:'2px 7px', borderRadius:4,
+        background: pct >= 70 ? 'var(--c-b-light, #d1fae5)' : 'var(--c-d-light, #ffe4e6)',
+        color:      pct >= 70 ? '#065f46' : '#9f1239',
+        fontWeight: 600,
+      }}>
+        <IconStarFill /> {c.nota}/{c.nota_maxima} ({pct}%)
+      </span>
+    )
+  }
+
+  // For material tab
+  const syllabusFiles = archivos.filter(f => isSyllabus(f.display_name))
+  const otherFiles    = archivos.filter(f => !isSyllabus(f.display_name))
+
+  // For grades tab
+  const gradedAssignments   = canvasGrades.filter(a => a.submission?.score != null && a.points_possible > 0)
+  const ungradedUpcoming    = canvasGrades.filter(a => a.submission?.score == null && a.due_at && a.due_at > new Date().toISOString())
+  const canvasGradeAvg      = gradedAssignments.length > 0
+    ? Math.round(gradedAssignments.reduce((s, a) => s + (a.submission.score / a.points_possible) * 100, 0) / gradedAssignments.length)
+    : null
 
   return (
     <AppShell user={user}>
@@ -476,6 +685,14 @@ export default function MateriaPage() {
                 <div className="subj-stat-num">{tareasPast.filter(t => t.completada).length}</div>
                 <div className="subj-stat-label">Completadas</div>
               </div>
+              {promedioCalif != null && (
+                <div className="subj-stat">
+                  <div className="subj-stat-num" style={{ color: promedioCalif >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
+                    {promedioCalif}%
+                  </div>
+                  <div className="subj-stat-label">Promedio</div>
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -499,15 +716,31 @@ export default function MateriaPage() {
             <span className="tab-count">{notas.length}</span>
           </button>
           <button className={`tab${tab === 'tareas' ? ' tab-active' : ''}`} onClick={() => setTab('tareas')}>
-            <IconCalendar /><span>Tareas y evaluaciones</span>
+            <IconCalendar /><span>Tareas</span>
             <span className="tab-count">{tareas.length}</span>
+          </button>
+          <button className={`tab${tab === 'calificaciones' ? ' tab-active' : ''}`} onClick={() => setTab('calificaciones')}>
+            <IconGrades /><span>Calificaciones</span>
+            {califDB.length > 0 && <span className="tab-count">{califDB.length}</span>}
+          </button>
+          <button className={`tab${tab === 'material' ? ' tab-active' : ''}`} onClick={() => setTab('material')}>
+            <IconFolder /><span>Material</span>
+            {archivos.length > 0 && <span className="tab-count">{archivos.length}</span>}
+          </button>
+          <button className={`tab${tab === 'anuncios' ? ' tab-active' : ''}`} onClick={() => setTab('anuncios')}>
+            <IconBell /><span>Anuncios</span>
+            {anuncios.filter(a => a.read_state === 'unread').length > 0 && (
+              <span className="tab-count" style={{ background:'var(--c-d)', color:'#fff' }}>
+                {anuncios.filter(a => a.read_state === 'unread').length}
+              </span>
+            )}
           </button>
         </div>
 
         {/* Tab panel */}
         <div className="tab-panel">
 
-          {/* ── Notas ──────────────────────────────────────────────────────── */}
+          {/* ── NOTAS ─────────────────────────────────────────────────────── */}
           {tab === 'notas' && (
             <div className="notes-tab">
               <div className="notes-head">
@@ -542,40 +775,41 @@ export default function MateriaPage() {
             </div>
           )}
 
-          {/* ── Tareas ─────────────────────────────────────────────────────── */}
+          {/* ── TAREAS ────────────────────────────────────────────────────── */}
           {tab === 'tareas' && (
             <div>
-              <div className="section-head" style={{ marginBottom: 20 }}>
+              <div className="section-head" style={{ marginBottom:20 }}>
                 <div className="files-label">{tareas.length} entrada{tareas.length !== 1 ? 's' : ''}</div>
                 <button className="btn btn-ghost xs" onClick={() => setTareaModal(true)}>
                   <IconPlus /> Nueva tarea
                 </button>
               </div>
-
               {loadTareas ? <SkeletonTasks /> : tareas.length === 0 ? (
                 <EmptyState title="Sin tareas aún"
                   sub="Agrega pruebas, entregas, lecturas o tareas para esta materia." />
               ) : (
                 <>
                   {tareasVig.length > 0 && (
-                    <div style={{ marginBottom: 36 }}>
-                      <div className="eyebrow" style={{ marginBottom: 12 }}>Próximas</div>
+                    <div style={{ marginBottom:36 }}>
+                      <div className="eyebrow" style={{ marginBottom:12 }}>Próximas</div>
                       <ul className="task-list">
                         {tareasVig.map(t => {
                           const days = daysAway(t.fecha)
                           const urgent = days <= 3
                           const pillColor = TIPO_PILL[t.tipo] || 'c'
+                          const badge = gradeBadge(t)
                           return (
                             <li key={t.id} className={`task ${t.completada ? 'task-done' : ''}`}>
                               <button className={`tcheck ${t.completada ? 'checked' : ''}`}
                                 onClick={() => toggleTarea(t.id, t.completada)}><IconCheck /></button>
                               <div className="task-main" onClick={() => !t.completada && setEditTarea(t)}>
                                 <div className="task-title">{t.titulo}</div>
-                                <div className="task-meta">
+                                <div className="task-meta" style={{ flexWrap:'wrap', gap:4 }}>
                                   <span className={`pill pill-${pillColor}`} style={{fontSize:10,padding:'1px 7px'}}>{TIPO_LABEL[t.tipo]||t.tipo}</span>
                                   <span className="meta-sep">·</span>
                                   <span>{formatShort(t.fecha)}</span>
                                   {t.duracion_min && <><span className="meta-sep">·</span><span>{t.duracion_min} min</span></>}
+                                  {badge && <>{badge}</>}
                                 </div>
                               </div>
                               <span className={urgent ? 'urgent-text' : 'task-time'}>{daysLabel(days)}</span>
@@ -586,22 +820,23 @@ export default function MateriaPage() {
                       </ul>
                     </div>
                   )}
-
                   {tareasPast.length > 0 && (
                     <div>
-                      <div className="eyebrow" style={{ marginBottom: 12 }}>Historial</div>
+                      <div className="eyebrow" style={{ marginBottom:12 }}>Historial</div>
                       <ul className="task-list">
                         {tareasPast.map(t => {
                           const pillColor = TIPO_PILL[t.tipo] || 'c'
+                          const badge = gradeBadge(t)
                           return (
                             <li key={t.id} className="task task-done">
                               <button className="tcheck checked"><IconCheck /></button>
                               <div className="task-main">
                                 <div className="task-title">{t.titulo}</div>
-                                <div className="task-meta">
+                                <div className="task-meta" style={{ flexWrap:'wrap', gap:4 }}>
                                   <span className={`pill pill-${pillColor}`} style={{fontSize:10,padding:'1px 7px'}}>{TIPO_LABEL[t.tipo]||t.tipo}</span>
                                   <span className="meta-sep">·</span>
                                   <span>{formatShort(t.fecha)}</span>
+                                  {badge && <>{badge}</>}
                                 </div>
                               </div>
                               <button className="task-del-btn" onClick={() => eliminarTarea(t.id)} title="Eliminar">×</button>
@@ -612,6 +847,349 @@ export default function MateriaPage() {
                     </div>
                   )}
                 </>
+              )}
+            </div>
+          )}
+
+          {/* ── CALIFICACIONES ────────────────────────────────────────────── */}
+          {tab === 'calificaciones' && (
+            <div>
+              {/* No Canvas connection */}
+              {!canvasId && !canvasConfig && (
+                <EmptyState title="Sin conexión a Canvas"
+                  sub="Configura Canvas en Ajustes para ver tus calificaciones detalladas.">
+                  <button className="btn btn-primary sm" style={{ marginTop:16 }}
+                    onClick={() => router.push('/configuracion')}>
+                    Ir a Configuración
+                  </button>
+                </EmptyState>
+              )}
+
+              {(canvasId || canvasConfig) && loadGrades && (
+                <div className="skeleton-list">
+                  {[1,2,3,4].map(i => <div key={i} className="skeleton-task" style={{ height:64 }}/>)}
+                </div>
+              )}
+
+              {(canvasId || canvasConfig) && !loadGrades && gradesError && (
+                <CanvasError msg={gradesError} router={router}
+                  onRetry={() => { loadGuard.current.grades = false; setGradesLoaded(false) }} />
+              )}
+
+              {(canvasId || canvasConfig) && !loadGrades && !gradesError && gradesLoaded && (
+                <>
+                  {/* Average banner */}
+                  {canvasGradeAvg != null && (
+                    <div style={{
+                      display:'flex', alignItems:'center', gap:20, padding:'20px 24px',
+                      background:'var(--surface-2,#f8f8f6)', borderRadius:12, marginBottom:28,
+                      border:'1px solid var(--border,#e8e6e1)',
+                    }}>
+                      <div>
+                        <div style={{ fontSize:11, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--ink-4)', marginBottom:4 }}>
+                          Promedio Canvas
+                        </div>
+                        <div style={{ fontSize:36, fontWeight:700, lineHeight:1, color: canvasGradeAvg >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
+                          {canvasGradeAvg}%
+                        </div>
+                      </div>
+                      <div style={{ height:52, width:1, background:'var(--border,#e8e6e1)' }} />
+                      <div style={{ fontSize:13, color:'var(--ink-3)' }}>
+                        <div>{gradedAssignments.length} evaluaci{gradedAssignments.length !== 1 ? 'ones' : 'ón'} calificada{gradedAssignments.length !== 1 ? 's' : ''}</div>
+                        {ungradedUpcoming.length > 0 && (
+                          <div style={{ marginTop:4 }}>{ungradedUpcoming.length} pendiente{ungradedUpcoming.length !== 1 ? 's' : ''} sin calificar</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Graded list */}
+                  {gradedAssignments.length > 0 && (
+                    <div style={{ marginBottom:32 }}>
+                      <div className="eyebrow" style={{ marginBottom:12 }}>Calificadas</div>
+                      <ul className="task-list">
+                        {gradedAssignments.map(a => {
+                          const pct = Math.round((a.submission.score / a.points_possible) * 100)
+                          const ok  = pct >= 70
+                          return (
+                            <li key={a.id} className="task" style={{ alignItems:'center', gap:12 }}>
+                              <div style={{ flexShrink:0 }}>
+                                <div style={{
+                                  width:38, height:38, borderRadius:8,
+                                  background: ok ? 'var(--c-b-light,#d1fae5)' : 'var(--c-d-light,#ffe4e6)',
+                                  display:'flex', alignItems:'center', justifyContent:'center',
+                                  fontSize:13, fontWeight:700,
+                                  color: ok ? '#065f46' : '#9f1239',
+                                }}>
+                                  {pct}%
+                                </div>
+                              </div>
+                              <div className="task-main">
+                                <div className="task-title" style={{ fontSize:13 }}>{a.name}</div>
+                                <div className="task-meta">
+                                  <span>{a.submission.score}/{a.points_possible} pts</span>
+                                  {a.due_at && <><span className="meta-sep">·</span><span>{formatShort(a.due_at.slice(0,10))}</span></>}
+                                  {a.submission.submitted_at && (
+                                    <><span className="meta-sep">·</span>
+                                    <span style={{ color: a.submission.late ? 'var(--c-d)' : 'var(--ink-3)' }}>
+                                      {a.submission.late ? 'Con retraso' : 'Entregado'}
+                                    </span></>
+                                  )}
+                                </div>
+                                {/* Grade bar */}
+                                <div style={{ marginTop:5, width:'100%', maxWidth:200, height:4, background:'var(--ink-6,#e8e6e1)', borderRadius:2, overflow:'hidden' }}>
+                                  <div style={{ width:`${Math.min(pct,100)}%`, height:'100%', background: ok ? 'var(--c-b)' : 'var(--c-d)', borderRadius:2, transition:'width .3s' }} />
+                                </div>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Upcoming ungraded */}
+                  {ungradedUpcoming.length > 0 && (
+                    <div>
+                      <div className="eyebrow" style={{ marginBottom:12 }}>Próximas sin calificar</div>
+                      <ul className="task-list">
+                        {ungradedUpcoming.sort((a,b) => a.due_at.localeCompare(b.due_at)).map(a => {
+                          const days = daysAway(a.due_at.slice(0,10))
+                          const urgent = days <= 3
+                          return (
+                            <li key={a.id} className="task">
+                              <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--ink-4)', flexShrink:0 }} />
+                              <div className="task-main">
+                                <div className="task-title" style={{ fontSize:13 }}>{a.name}</div>
+                                {a.due_at && (
+                                  <div className="task-meta">
+                                    <IconCalendar /> <span>{formatShort(a.due_at.slice(0,10))}</span>
+                                  </div>
+                                )}
+                              </div>
+                              {a.due_at && (
+                                <span className={urgent ? 'urgent-text' : 'task-time'}>{daysLabel(days)}</span>
+                              )}
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {gradedAssignments.length === 0 && ungradedUpcoming.length === 0 && (
+                    <EmptyState title="Sin evaluaciones en Canvas"
+                      sub="No se encontraron evaluaciones para este curso." />
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── MATERIAL ──────────────────────────────────────────────────── */}
+          {tab === 'material' && (
+            <div>
+              {/* No Canvas connection */}
+              {!canvasId && !canvasConfig && (
+                <EmptyState title="Sin conexión a Canvas"
+                  sub="Configura Canvas en Ajustes para ver el material del curso.">
+                  <button className="btn btn-primary sm" style={{ marginTop:16 }}
+                    onClick={() => router.push('/configuracion')}>
+                    Ir a Configuración
+                  </button>
+                </EmptyState>
+              )}
+
+              {(canvasId || canvasConfig) && loadMaterial && (
+                <div className="skeleton-list">
+                  {[1,2,3,4,5].map(i => <div key={i} className="skeleton-task" style={{ height:52 }}/>)}
+                </div>
+              )}
+
+              {(canvasId || canvasConfig) && !loadMaterial && materialError && (
+                <CanvasError msg={materialError} router={router}
+                  onRetry={() => { loadGuard.current.material = false; setMaterialLoaded(false) }} />
+              )}
+
+              {!loadMaterial && !materialError && materialLoaded && (
+                <>
+                  {/* Módulos del curso */}
+                  {modulos.length > 0 && (
+                    <div style={{ marginBottom:36 }}>
+                      <div className="eyebrow" style={{ marginBottom:12 }}>
+                        <IconMod /> Módulos del curso · {modulos.length}
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        {modulos.map(mod => (
+                          <details key={mod.id} style={{
+                            border:'1px solid var(--border,#e8e6e1)',
+                            borderRadius:10,
+                            overflow:'hidden',
+                          }}>
+                            <summary style={{
+                              padding:'12px 16px', cursor:'pointer', userSelect:'none',
+                              display:'flex', alignItems:'center', gap:10,
+                              background:'var(--surface-2,#f8f8f6)',
+                              fontWeight:500, fontSize:14, listStyle:'none',
+                            }}>
+                              <span style={{ flex:1 }}>{mod.name}</span>
+                              {mod.items && <span style={{ fontSize:11, color:'var(--ink-4)' }}>{mod.items.length} elemento{mod.items.length !== 1 ? 's' : ''}</span>}
+                              <span style={{ color:'var(--ink-4)', fontSize:12 }}>▸</span>
+                            </summary>
+                            {mod.items && mod.items.length > 0 && (
+                              <ul style={{ listStyle:'none', margin:0, padding:'4px 0', borderTop:'1px solid var(--border,#e8e6e1)' }}>
+                                {mod.items.map(item => (
+                                  item.type === 'SubHeader'
+                                    ? <li key={item.id} style={{ padding:'8px 16px 4px', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.07em', color:'var(--ink-4)' }}>
+                                        {item.title}
+                                      </li>
+                                    : <li key={item.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 16px', borderBottom:'1px solid var(--border-subtle,#f0ede8)' }}>
+                                        <span style={{ fontSize:16, flexShrink:0 }}>{moduleItemIcon(item.type)}</span>
+                                        <div style={{ flex:1, minWidth:0 }}>
+                                          {item.html_url
+                                            ? <a href={item.html_url} target="_blank" rel="noopener noreferrer"
+                                                style={{ fontSize:13, color:'var(--ink-1)', textDecoration:'none' }}
+                                                className="mod-item-link">
+                                                {item.title}
+                                              </a>
+                                            : <span style={{ fontSize:13 }}>{item.title}</span>
+                                          }
+                                        </div>
+                                        <span style={{ fontSize:10, textTransform:'uppercase', color:'var(--ink-5)', flexShrink:0 }}>{item.type}</span>
+                                      </li>
+                                ))}
+                              </ul>
+                            )}
+                            {(!mod.items || mod.items.length === 0) && (
+                              <div style={{ padding:'12px 16px', fontSize:13, color:'var(--ink-4)' }}>Sin elementos publicados</div>
+                            )}
+                          </details>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Archivos */}
+                  <div>
+                    <div className="eyebrow" style={{ marginBottom:12 }}>
+                      Archivos · {archivos.length}
+                    </div>
+
+                    {archivos.length === 0 && (
+                      <EmptyState title="Sin archivos publicados"
+                        sub="El profesor aún no ha subido archivos a este curso en Canvas." />
+                    )}
+
+                    {/* Syllabus files first */}
+                    {syllabusFiles.length > 0 && (
+                      <ul className="task-list" style={{ gap:2, marginBottom:12 }}>
+                        {syllabusFiles.map(f => (
+                          <FileRow key={f.id} f={f} onPreview={isPdf(f) ? () => setPdfFile(f) : null} />
+                        ))}
+                      </ul>
+                    )}
+
+                    {otherFiles.length > 0 && (
+                      <ul className="task-list" style={{ gap:2 }}>
+                        {otherFiles.map(f => (
+                          <FileRow key={f.id} f={f} onPreview={isPdf(f) ? () => setPdfFile(f) : null} />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── ANUNCIOS ──────────────────────────────────────────────────── */}
+          {tab === 'anuncios' && (
+            <div>
+              {!canvasId && !canvasConfig && (
+                <EmptyState title="Sin conexión a Canvas"
+                  sub="Configura Canvas en Ajustes para ver los anuncios del curso.">
+                  <button className="btn btn-primary sm" style={{ marginTop:16 }}
+                    onClick={() => router.push('/configuracion')}>
+                    Ir a Configuración
+                  </button>
+                </EmptyState>
+              )}
+
+              {(canvasId || canvasConfig) && loadAnuncios && (
+                <div className="skeleton-list">
+                  {[1,2,3].map(i => <div key={i} className="skeleton-task" style={{ height:100 }}/>)}
+                </div>
+              )}
+
+              {(canvasId || canvasConfig) && !loadAnuncios && anunciosError && (
+                <CanvasError msg={anunciosError} router={router}
+                  onRetry={() => { loadGuard.current.anuncios = false; setAnunciosLoaded(false) }} />
+              )}
+
+              {!loadAnuncios && !anunciosError && anunciosLoaded && anuncios.length === 0 && (
+                <EmptyState title="Sin anuncios"
+                  sub="El profesor no ha publicado anuncios en este curso." />
+              )}
+
+              {!loadAnuncios && !anunciosError && anunciosLoaded && anuncios.length > 0 && (
+                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                  <div className="files-label" style={{ marginBottom:4 }}>
+                    {anuncios.length} anuncio{anuncios.length !== 1 ? 's' : ''}
+                    {anuncios.filter(a => a.read_state === 'unread').length > 0 && (
+                      <span style={{ marginLeft:8, fontSize:11, color:'var(--c-d)', fontWeight:600 }}>
+                        · {anuncios.filter(a => a.read_state === 'unread').length} nuevo{anuncios.filter(a => a.read_state === 'unread').length !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  {anuncios.map(a => {
+                    const preview = stripHtml(a.message).slice(0, 280)
+                    const full    = stripHtml(a.message)
+                    const hasMore = full.length > 280
+                    const isUnread = a.read_state === 'unread'
+                    return (
+                      <details key={a.id} style={{
+                        border:`1px solid ${isUnread ? 'var(--c-b,#3b82f6)' : 'var(--border,#e8e6e1)'}`,
+                        borderRadius:12, overflow:'hidden',
+                      }}>
+                        <summary style={{ padding:'16px 20px', cursor:'pointer', listStyle:'none', userSelect:'none' }}>
+                          <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                                {isUnread && (
+                                  <span style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:4, background:'var(--c-b,#3b82f6)', color:'#fff', flexShrink:0 }}>
+                                    NUEVO
+                                  </span>
+                                )}
+                                <span style={{ fontSize:14, fontWeight:600, lineHeight:1.3 }}>{a.title}</span>
+                              </div>
+                              <div style={{ fontSize:12, color:'var(--ink-4)', marginBottom:6 }}>
+                                {a.author?.display_name && <><span>{a.author.display_name}</span><span className="meta-sep">·</span></>}
+                                <span>{formatAnnouncementDate(a.posted_at)}</span>
+                              </div>
+                              {preview && (
+                                <div style={{ fontSize:13, color:'var(--ink-3)', lineHeight:1.5, overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>
+                                  {preview}
+                                </div>
+                              )}
+                            </div>
+                            <span style={{ color:'var(--ink-4)', fontSize:12, flexShrink:0, marginTop:2 }}>▸</span>
+                          </div>
+                        </summary>
+                        <div style={{ padding:'0 20px 16px', borderTop:'1px solid var(--border-subtle,#f0ede8)' }}>
+                          <div style={{ paddingTop:16, fontSize:14, color:'var(--ink-2)', lineHeight:1.7, whiteSpace:'pre-wrap' }}>
+                            {full}
+                          </div>
+                          {a.html_url && (
+                            <a href={a.html_url} target="_blank" rel="noopener noreferrer"
+                              className="btn btn-ghost xs" style={{ marginTop:12, textDecoration:'none', display:'inline-flex', alignItems:'center', gap:4 }}>
+                              Ver en Canvas →
+                            </a>
+                          )}
+                        </div>
+                      </details>
+                    )
+                  })}
+                </div>
               )}
             </div>
           )}
@@ -642,6 +1220,51 @@ export default function MateriaPage() {
           onClose={() => setEditTarea(null)}
           onSave={updates => actualizarTarea(editTarea.id, updates)} />
       )}
+
+      {pdfFile && <PdfModal file={pdfFile} onClose={() => setPdfFile(null)} />}
     </AppShell>
+  )
+}
+
+// ── FileRow ───────────────────────────────────────────────────────────────────
+function FileRow({ f, onPreview }) {
+  const syl = isSyllabus(f.display_name)
+  return (
+    <li className="task" style={{ alignItems:'center' }}>
+      <span style={{ fontSize:20, lineHeight:1, flexShrink:0 }}>
+        {syl ? '⭐' : fileIcon(f.mime_class, f['content-type'])}
+      </span>
+      <div className="task-main">
+        <div className="task-title" style={{ fontSize:13 }}>
+          {f.display_name}
+          {syl && <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:4, background:'var(--c-a-light,#fef3c7)', color:'#92400e', fontWeight:600 }}>Programa</span>}
+        </div>
+        <div className="task-meta">
+          <span style={{ textTransform:'uppercase', fontSize:10, letterSpacing:'0.05em', color:'var(--ink-4)' }}>
+            {f.mime_class || (f['content-type'] || '').split('/').pop() || 'archivo'}
+          </span>
+          {f.size && <><span className="meta-sep">·</span><span>{formatFileSize(f.size)}</span></>}
+          {f.updated_at && <><span className="meta-sep">·</span><span>{formatDate(f.updated_at)}</span></>}
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+        {onPreview && (
+          <button className="btn btn-ghost xs"
+            style={{ display:'inline-flex', alignItems:'center', gap:4 }}
+            onClick={onPreview}>
+            <IconEye /> Vista previa
+          </button>
+        )}
+        {f.url && (
+          <a href={f.url} target="_blank" rel="noopener noreferrer"
+            download={f.filename || f.display_name}
+            className="btn btn-ghost xs"
+            style={{ flexShrink:0, display:'inline-flex', alignItems:'center', gap:4, textDecoration:'none' }}
+            onClick={e => e.stopPropagation()}>
+            <IconDownload /> Descargar
+          </a>
+        )}
+      </div>
+    </li>
   )
 }

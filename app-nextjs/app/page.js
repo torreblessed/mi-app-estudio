@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/AppShell'
+import { syncCanvasData, loadCanvasConfig } from '@/lib/canvas'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconBook()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
@@ -17,6 +18,8 @@ function IconCalendar() { return <svg width="14" height="14" viewBox="0 0 24 24"
 function IconFileText() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg> }
 function IconCheck()    { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg> }
 function IconX()        { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> }
+function IconRefresh()  { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> }
+function IconCanvas()   { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg> }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDateLong() {
@@ -31,6 +34,13 @@ function formatDate(iso) {
   const d = new Date(iso)
   const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
   return `${d.getDate()} ${months[d.getMonth()]}`
+}
+
+function formatSyncTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`
 }
 
 function daysLabel(n) {
@@ -81,7 +91,7 @@ function EmptyState({ title, sub }) {
 
 // ── Subject card ──────────────────────────────────────────────────────────────
 function SubjectCard({ materia, onClick }) {
-  const color  = materiaColor(materia.nombre)
+  const color  = materia.color || materiaColor(materia.nombre)
   const ne     = materia.nextEval
   const urgent = ne && ne.daysAway <= 3
   return (
@@ -89,11 +99,18 @@ function SubjectCard({ materia, onClick }) {
       <div className="subj-card-head">
         <div className="subj-codeline">
           <span className={`dot dot-${color}`} />
-          <span>{materia.nombre}</span>
+          <span>{materia.codigo || materia.nombre}</span>
         </div>
-        <span className="foot-stat" style={{ fontSize: 11 }}>
-          {materia.notasCount} nota{materia.notasCount !== 1 ? 's' : ''}
-        </span>
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          {materia.promedio != null && (
+            <span className="foot-stat" style={{ fontSize:11, color: materia.promedio >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
+              {materia.promedio}%
+            </span>
+          )}
+          <span className="foot-stat" style={{ fontSize: 11 }}>
+            {materia.notasCount} nota{materia.notasCount !== 1 ? 's' : ''}
+          </span>
+        </div>
       </div>
       <div className="subj-name">{materia.nombre}</div>
       {ne ? (
@@ -439,6 +456,20 @@ export default function HomePage() {
   const [guardando, setGuardando] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
 
+  // Materias table (Canvas synced)
+  const [materiasTable,    setMateriasTable]    = useState([])
+  const [loadingMaterias,  setLoadingMaterias]  = useState(true)
+  const [calificaciones,   setCalificaciones]   = useState([])
+
+  // Canvas sync
+  const [canvasConfig,  setCanvasConfig]  = useState(null)
+  const [syncing,       setSyncing]       = useState(false)
+  const [syncLog,       setSyncLog]       = useState('')
+  const [syncPct,       setSyncPct]       = useState(0)
+  const [lastSync,      setLastSync]      = useState(null)
+  const [syncError,     setSyncError]     = useState('')
+  const [showSyncLog,   setShowSyncLog]   = useState(false)
+
   // ── Computed ──────────────────────────────────────────────────────────────
   const notasFiltradas = useMemo(
     () => filtro ? allNotas.filter(n => n.materia === filtro) : allNotas,
@@ -446,26 +477,54 @@ export default function HomePage() {
   )
 
   const materias = useMemo(() => {
-    const map = {}
+    // Las tarjetas SOLO vienen de la tabla materias (Canvas sync o manual).
+    // Notas y evals enriquecen los datos pero no crean tarjetas nuevas.
+
+    // Índice de notas por materia
+    const notasCounts = {}
     allNotas.forEach(n => {
-      if (!n.materia) return
-      if (!map[n.materia]) map[n.materia] = { nombre: n.materia, notasCount: 0, nextEval: null }
-      map[n.materia].notasCount++
+      if (n.materia) notasCounts[n.materia] = (notasCounts[n.materia] || 0) + 1
     })
+
+    // Próxima eval por materia
+    const nextEvalByMateria = {}
     upcomingEvals.forEach(e => {
-      if (!e.materia) return
-      if (!map[e.materia]) map[e.materia] = { nombre: e.materia, notasCount: 0, nextEval: null }
-      if (!map[e.materia].nextEval) {
-        const d = new Date(e.fecha + 'T12:00:00')
-        const hoy = new Date(); hoy.setHours(0,0,0,0)
-        const daysAway = Math.round((d - hoy) / 86400000)
-        map[e.materia].nextEval = { tipo: e.tipo, titulo: e.titulo, daysAway }
+      if (!e.materia || nextEvalByMateria[e.materia]) return
+      const d = new Date(e.fecha + 'T12:00:00')
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+      nextEvalByMateria[e.materia] = {
+        tipo: e.tipo, titulo: e.titulo,
+        daysAway: Math.round((d - hoy) / 86400000),
       }
     })
-    return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre))
-  }, [allNotas, upcomingEvals])
 
-  const materiasList = useMemo(() => materias.map(m => m.nombre), [materias])
+    // Promedio por materia
+    const califSums = {}
+    calificaciones.forEach(c => {
+      if (!c.materia || !c.nota_maxima) return
+      if (!califSums[c.materia]) califSums[c.materia] = { s: 0, n: 0 }
+      califSums[c.materia].s += (c.nota / c.nota_maxima) * 100
+      califSums[c.materia].n += 1
+    })
+
+    return materiasTable.map(m => ({
+      nombre:    m.nombre,
+      codigo:    m.codigo,
+      color:     m.color || materiaColor(m.nombre),
+      notasCount: notasCounts[m.nombre] || 0,
+      nextEval:  nextEvalByMateria[m.nombre] || null,
+      promedio:  califSums[m.nombre]
+        ? Math.round(califSums[m.nombre].s / califSums[m.nombre].n)
+        : null,
+    })).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [allNotas, upcomingEvals, materiasTable, calificaciones])
+
+  // materiasList para los modales: materias de la tabla + nombres de notas existentes
+  const materiasList = useMemo(() => {
+    const names = new Set(materiasTable.map(m => m.nombre))
+    allNotas.forEach(n => { if (n.materia) names.add(n.materia) })
+    return [...names].sort()
+  }, [materiasTable, allNotas])
 
   const urgentEval = useMemo(() => {
     return upcomingEvals.find(e => {
@@ -568,6 +627,74 @@ export default function HomePage() {
 
   useEffect(() => { if (ready) cargarNotas() }, [ready, cargarNotas])
 
+  // ── Materias table ────────────────────────────────────────────────────────
+  const cargarMaterias = useCallback(async () => {
+    setLoadingMaterias(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setLoadingMaterias(false); return }
+    const { data, error } = await supabase
+      .from('materias').select('*').eq('user_id', u.id).order('nombre')
+    console.log('[Materias] cargadas:', data?.length ?? 0, error?.message ?? 'ok')
+    setMateriasTable(data ?? [])
+    setLoadingMaterias(false)
+  }, [])
+
+  useEffect(() => { if (ready) cargarMaterias() }, [ready, cargarMaterias])
+
+  // ── Calificaciones ────────────────────────────────────────────────────────
+  const cargarCalificaciones = useCallback(async () => {
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) return
+    const { data } = await supabase.from('calificaciones').select('*').eq('user_id', u.id)
+    if (data) setCalificaciones(data)
+  }, [])
+
+  useEffect(() => { if (ready) cargarCalificaciones() }, [ready, cargarCalificaciones])
+
+  // ── Canvas config ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!ready || !user) return
+    loadCanvasConfig(supabase, user.id).then(cfg => {
+      if (cfg) {
+        setCanvasConfig(cfg)
+        if (cfg.lastSync) setLastSync(cfg.lastSync)
+      }
+    })
+
+    // También cargar última sync desde Supabase
+    supabase.from('configuracion_usuario')
+      .select('ultima_sync').eq('user_id', user.id).single()
+      .then(({ data }) => { if (data?.ultima_sync) setLastSync(data.ultima_sync) })
+  }, [ready, user])
+
+  // ── Sincronizar Canvas ────────────────────────────────────────────────────
+  async function sincronizarCanvas() {
+    if (!canvasConfig) { router.push('/configuracion'); return }
+    setSyncing(true); setSyncLog(''); setSyncPct(0); setSyncError(''); setShowSyncLog(true)
+
+    try {
+      const result = await syncCanvasData(
+        canvasConfig.url, canvasConfig.token, user.id, supabase, {
+          onLog:      msg => setSyncLog(prev => prev ? prev + '\n' + msg : msg),
+          onProgress: n   => setSyncPct(n),
+        }
+      )
+      setLastSync(result.now)
+      // Recargar todo
+      await Promise.all([cargarMaterias(), cargarCalificaciones(), cargarTareas(), cargarCalendario(), cargarEvals()])
+      setDismissedAlert(false)
+    } catch (err) {
+      const msg = err.message.includes('401') || err.message.includes('403')
+        ? 'Token inválido. Verifica tu token en Configuración.'
+        : err.message.includes('fetch') || err.message.includes('network')
+        ? 'Canvas no responde. Mostrando datos en caché.'
+        : err.message
+      setSyncError(msg)
+      setSyncLog(prev => (prev ? prev + '\n' : '') + '✗ ' + msg)
+    }
+    setSyncing(false)
+  }
+
   // ── Actions ───────────────────────────────────────────────────────────────
   async function toggleTarea(id, completada) {
     setTareas(prev => prev.map(t => t.id === id ? { ...t, completada: !completada } : t))
@@ -661,7 +788,7 @@ export default function HomePage() {
             <span className="alert-icon">⚡</span>
             <span>
               Tienes una <strong>{TIPO_LABEL[urgentEval.tipo]}</strong> de <strong>{urgentEval.materia}</strong>{' '}
-              {daysLabel(urgentDays(urgentEval)).toLowerCase() === 'hoy'
+              {urgentDays(urgentEval) === 0
                 ? <><strong>hoy</strong>.</>
                 : <>en <strong>{urgentDays(urgentEval)} {urgentDays(urgentEval) === 1 ? 'día' : 'días'}</strong>.</>
               }
@@ -746,12 +873,83 @@ export default function HomePage() {
               <div className="section-head">
                 <h2 className="section-title">Materias</h2>
                 <span className="link-mini">{materias.length} asignatura{materias.length !== 1 ? 's' : ''}</span>
+                <button
+                  className="btn btn-ghost xs"
+                  onClick={sincronizarCanvas}
+                  disabled={syncing}
+                  title={canvasConfig ? 'Actualizar desde Canvas' : 'Configurar Canvas'}
+                >
+                  <IconRefresh /> {syncing ? 'Sincronizando…' : 'Actualizar'}
+                </button>
               </div>
-              {loadNotas && materias.length === 0 ? <SkeletonCards /> : materias.length === 0 ? (
-                <EmptyState
-                  title="Sin materias todavía"
-                  sub="Crea tu primera nota o tarea y tus materias aparecerán aquí automáticamente."
-                />
+
+              {/* Sync status bar */}
+              {(lastSync || syncError) && (
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, fontSize:12, color:'var(--ink-4)' }}>
+                  {canvasConfig && <IconCanvas />}
+                  {lastSync && !syncError && (
+                    <span>Última sync: {formatSyncTime(lastSync)}</span>
+                  )}
+                  {syncError && (
+                    <span style={{ color:'var(--danger)' }}>{syncError}</span>
+                  )}
+                  {syncing && (
+                    <span style={{ color:'var(--ink-3)' }}> · {syncPct}%</span>
+                  )}
+                  {showSyncLog && syncLog && (
+                    <button
+                      style={{ marginLeft:'auto', fontSize:11, color:'var(--ink-4)', background:'none', border:'none', cursor:'pointer', textDecoration:'underline' }}
+                      onClick={() => setShowSyncLog(s => !s)}
+                    >
+                      Ver log
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Barra de progreso */}
+              {syncing && (
+                <div style={{ marginBottom: 8 }}>
+                  <div className="sync-bar-track">
+                    <div className="sync-bar-fill" style={{ width:`${syncPct}%`, transition:'width 0.4s ease' }} />
+                  </div>
+                  {syncLog && (
+                    <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:4 }}>
+                      {syncLog.split('\n').filter(Boolean).pop()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Log completo (colapsable) */}
+              {!syncing && showSyncLog && syncLog && (
+                <details style={{ marginBottom:12 }}>
+                  <summary style={{ fontSize:11, color:'var(--ink-4)', cursor:'pointer', userSelect:'none' }}>
+                    Ver log del último sync
+                  </summary>
+                  <div className="sync-log" style={{ marginTop:6, fontSize:11, maxHeight:120, overflow:'auto' }}>
+                    {syncLog}
+                  </div>
+                </details>
+              )}
+
+              {loadingMaterias ? <SkeletonCards /> : materias.length === 0 ? (
+                <div className="empty">
+                  <div className="empty-art">
+                    <div className="empty-doc"/><div className="empty-doc"/><div className="empty-doc front"/>
+                  </div>
+                  <div className="empty-title">Sin materias todavía</div>
+                  <div className="empty-sub">
+                    {canvasConfig
+                      ? 'Haz clic en "Actualizar" para importar tus cursos desde Canvas.'
+                      : 'Configura tu cuenta de Canvas para importar tus cursos automáticamente.'}
+                  </div>
+                  <div style={{ display:'flex', gap:10, marginTop:16, flexWrap:'wrap', justifyContent:'center' }}>
+                    <button className="btn btn-primary sm" onClick={sincronizarCanvas} disabled={syncing}>
+                      <IconRefresh /> {canvasConfig ? 'Sincronizar Canvas' : 'Configurar Canvas'}
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="subjects-grid">
                   {materias.map(m => (

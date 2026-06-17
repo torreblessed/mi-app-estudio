@@ -204,7 +204,7 @@ export default function TutorPage() {
           </button>
         </div>
         <div style={{ marginTop:8, fontSize:11.5, color:'var(--ink-4)', textAlign:'center' }}>
-          Potenciado por Claude · Las respuestas son orientativas, no reemplazan a tu profesor
+          Potenciado por Gemini · Las respuestas son orientativas, no reemplazan a tu profesor
         </div>
       </div>
     </div>

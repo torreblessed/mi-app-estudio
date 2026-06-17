@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/AppShell'
-import { getCourses, getAssignments, assignmentToTarea } from '@/lib/canvas'
+import { getCourses, syncCanvasData } from '@/lib/canvas'
 
 function IconCanvas() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> }
 function IconCheck()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg> }
@@ -99,56 +99,15 @@ export default function ConfiguracionPage() {
     }
     setSyncing(true); setSyncLog(''); setSyncPct(0)
     const { data: { user: u } } = await supabase.auth.getUser()
-    const url   = canvasUrl.trim().replace(/\/$/, '')
-    const token = canvasToken.trim()
 
     try {
-      log('Obteniendo cursos activos…')
-      const courses = await getCourses(url, token)
-      const active  = courses.filter(c => !c.access_restricted_by_date)
-      log(`Encontré ${active.length} curso(s) activo(s).`)
-      setSyncPct(15)
-
-      let totalImported = 0
-      for (let i = 0; i < active.length; i++) {
-        const course = active[i]
-        const materia = course.name
-        log(`[${i+1}/${active.length}] ${materia}`)
-
-        // Upsert materia
-        await supabase.from('materias').upsert(
-          { user_id: u.id, nombre: materia, canvas_id: course.id },
-          { onConflict: 'user_id,canvas_id' }
-        ).catch(() => {})
-
-        // Get assignments
-        try {
-          const assignments = await getAssignments(url, token, course.id)
-          const futuras = assignments.filter(a => a.due_at && new Date(a.due_at) > new Date(Date.now() - 7*86400000))
-          log(`  → ${futuras.length} tareas con fecha`)
-
-          for (const a of futuras) {
-            const tarea = assignmentToTarea(a, materia, u.id)
-            await supabase.from('tareas').upsert(
-              tarea, { onConflict: 'canvas_assignment_id,user_id' }
-            ).catch(() => {})
-            totalImported++
-          }
-        } catch { log('  ⚠ Sin permisos para assignments') }
-
-        setSyncPct(15 + Math.round(((i+1) / active.length) * 80))
-      }
-
-      // Update last sync
-      await supabase.from('configuracion_usuario').upsert(
-        { user_id: u.id, ultima_sync: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      )
-      setLastSync(new Date().toISOString())
-      setSyncPct(100)
-      log(`✓ Sincronización completa. ${totalImported} tareas importadas.`)
+      const result = await syncCanvasData(canvasUrl, canvasToken, u.id, supabase, {
+        onLog:      msg => setSyncLog(prev => prev ? prev + '\n' + msg : msg),
+        onProgress: n   => setSyncPct(n),
+      })
+      setLastSync(result.now)
     } catch (err) {
-      log('✗ Error: ' + err.message)
+      setSyncLog(prev => (prev ? prev + '\n' : '') + '✗ Error: ' + err.message)
     }
     setSyncing(false)
   }
