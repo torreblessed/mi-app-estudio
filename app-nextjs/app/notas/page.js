@@ -45,6 +45,9 @@ export default function NotasPage() {
   const [notas,   setNotas]   = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Materias desde Supabase (para filtros y modales)
+  const [materiasTable, setMateriasTable] = useState([])
+
   // Filters
   const [busqueda,  setBusqueda]  = useState('')
   const [filtroMat, setFiltroMat] = useState('')
@@ -76,16 +79,25 @@ export default function NotasPage() {
     setLoading(true)
     const { data: { user: u } } = await supabase.auth.getUser()
     if (!u) { setLoading(false); return }
-    const { data, error } = await supabase
-      .from('notas').select('*').eq('user_id', u.id)
-      .order('created_at', { ascending: false })
-    if (!error) setNotas(data ?? [])
+    const [notasRes, matsRes] = await Promise.all([
+      supabase.from('notas').select('*').eq('user_id', u.id)
+        .order('created_at', { ascending: false }),
+      supabase.from('materias').select('nombre').eq('user_id', u.id)
+        .neq('activa', false).order('nombre'),
+    ])
+    if (!notasRes.error) setNotas(notasRes.data ?? [])
+    if (!matsRes.error)  setMateriasTable(matsRes.data ?? [])
     setLoading(false)
   }, [])
 
   useEffect(() => { if (ready) cargar() }, [ready, cargar])
 
-  const materiasList = useMemo(() => [...new Set(notas.map(n => n.materia).filter(Boolean))].sort(), [notas])
+  // Materias = tabla materias (activas) ∪ materias de notas existentes
+  const materiasList = useMemo(() => {
+    const names = new Set(materiasTable.map(m => m.nombre))
+    notas.forEach(n => { if (n.materia) names.add(n.materia) })
+    return [...names].sort()
+  }, [materiasTable, notas])
 
   const notasFiltradas = useMemo(() => {
     let res = notas
@@ -217,15 +229,11 @@ export default function NotasPage() {
               <div className="field">
                 <label className="label">Materia</label>
                 <div className="input-wrap">
-                  {materiasList.length > 0 ? (
-                    <><select value={crearMateria} onChange={e => setCrearMateria(e.target.value)}>
-                      <option value="">Sin materia</option>
-                      {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select><span className="select-arrow"><IconChevron /></span></>
-                  ) : (
-                    <input type="text" placeholder="Nombre de la materia"
-                      value={crearMateria} onChange={e => setCrearMateria(e.target.value)} style={{paddingLeft:14}} />
-                  )}
+                  <select value={crearMateria} onChange={e => setCrearMateria(e.target.value)}>
+                    <option value="">Sin materia</option>
+                    {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <span className="select-arrow"><IconChevron /></span>
                 </div>
               </div>
               <div className="field">

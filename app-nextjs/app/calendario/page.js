@@ -35,6 +35,7 @@ export default function CalendarioPage() {
   const [ready,   setReady]   = useState(false)
   const [tareas,  setTareas]  = useState([])
   const [loading, setLoading] = useState(true)
+  const [materiasList, setMateriasList] = useState([])
 
   const today    = new Date()
   const [year,  setYear]  = useState(today.getFullYear())
@@ -60,6 +61,16 @@ export default function CalendarioPage() {
     })
   }, [router])
 
+  // Cargar materias activas para el selector
+  const cargarMaterias = useCallback(async () => {
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) return
+    const { data } = await supabase
+      .from('materias').select('nombre').eq('user_id', u.id)
+      .neq('activa', false).order('nombre')
+    if (data) setMateriasList(data.map(m => m.nombre))
+  }, [])
+
   const cargar = useCallback(async () => {
     setLoading(true)
     const { data: { user: u } } = await supabase.auth.getUser()
@@ -74,7 +85,7 @@ export default function CalendarioPage() {
     setLoading(false)
   }, [year, month])
 
-  useEffect(() => { if (ready) cargar() }, [ready, cargar])
+  useEffect(() => { if (ready) { cargar(); cargarMaterias() } }, [ready, cargar, cargarMaterias])
 
   function prevMonth() { if (month === 0) { setYear(y => y-1); setMonth(11) } else setMonth(m => m-1) }
   function nextMonth() { if (month === 11) { setYear(y => y+1); setMonth(0) } else setMonth(m => m+1) }
@@ -222,8 +233,11 @@ export default function CalendarioPage() {
                 <div className="field">
                   <label className="label">Materia</label>
                   <div className="input-wrap">
-                    <input type="text" placeholder="Materia (opcional)"
-                      value={crearMat} onChange={e => setCrearMat(e.target.value)} style={{paddingLeft:14}} />
+                    <select value={crearMat} onChange={e => setCrearMat(e.target.value)}>
+                      <option value="">Sin materia</option>
+                      {materiasList.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <span className="select-arrow"><IconChevron /></span>
                   </div>
                 </div>
                 <div className="field">
