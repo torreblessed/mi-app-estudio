@@ -110,7 +110,7 @@ function SubjectCard({ materia, onClick }) {
             </span>
           )}
           <span className="foot-stat" style={{ fontSize: 11 }}>
-            {materia.notasCount} nota{materia.notasCount !== 1 ? 's' : ''}
+            {materia.notasCount} apunte{materia.notasCount !== 1 ? 's' : ''}
           </span>
         </div>
       </div>
@@ -192,7 +192,7 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
         <div className="modal-head">
-          <div><h2 className="card-title">Nueva nota</h2><div className="card-sub">Guarda apuntes por materia</div></div>
+          <div><h2 className="card-title">Nuevo apunte</h2><div className="card-sub">Guarda apuntes por materia</div></div>
           <button className="modal-close" onClick={onClose}><IconX /></button>
         </div>
         <div className="card-fields">
@@ -1078,10 +1078,10 @@ export default function HomePage() {
               )}
             </section>
 
-            {/* Mis notas */}
+            {/* Mis apuntes */}
             <section>
               <div className="section-head">
-                <h2 className="section-title">Mis notas</h2>
+                <h2 className="section-title">Mis apuntes</h2>
                 <button className="btn btn-ghost xs" onClick={() => setModalOpen(true)}>
                   <IconPlus /> Nueva
                 </button>
@@ -1099,15 +1099,15 @@ export default function HomePage() {
 
               {loadNotas ? <SkeletonNotes /> : notasFiltradas.length === 0 ? (
                 <EmptyState
-                  title={allNotas.length === 0 ? "Aún no tienes notas" : "Sin notas en esta materia"}
+                  title={allNotas.length === 0 ? "Aún no tienes apuntes" : "Sin apuntes en esta materia"}
                   sub={allNotas.length === 0
                     ? "Usa el botón Nueva o el FAB verde para guardar tu primer apunte."
-                    : "Agrega notas a esta materia desde el botón Nueva."}
+                    : "Agrega apuntes a esta materia desde el botón Nueva."}
                 />
               ) : (
                 <div className="notes-tab">
                   <div className="notes-head">
-                    <div className="files-label">{notasFiltradas.length} nota{notasFiltradas.length !== 1 ? 's' : ''}</div>
+                    <div className="files-label">{notasFiltradas.length} apunte{notasFiltradas.length !== 1 ? 's' : ''}</div>
                   </div>
                   <div className="notes-grid">
                     {notasFiltradas.map(nota => (
@@ -1194,7 +1194,7 @@ export default function HomePage() {
 
       {/* FAB */}
       <button className="fab" onClick={() => setModalOpen(true)}>
-        <IconPlus /><span>Nueva nota</span>
+        <IconPlus /><span>Nuevo apunte</span>
       </button>
 
       {/* Note modal */}

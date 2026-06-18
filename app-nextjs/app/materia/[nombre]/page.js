@@ -797,7 +797,7 @@ export default function MateriaPage() {
         {/* Tabs */}
         <div className="tabs">
           <button className={`tab${tab === 'notas' ? ' tab-active' : ''}`} onClick={() => setTab('notas')}>
-            <IconFileText /><span>Notas</span>
+            <IconFileText /><span>Apuntes</span>
             <span className="tab-count">{notas.length}</span>
           </button>
           <button className={`tab${tab === 'tareas' ? ' tab-active' : ''}`} onClick={() => setTab('tareas')}>
@@ -832,13 +832,13 @@ export default function MateriaPage() {
           {tab === 'notas' && (
             <div className="notes-tab">
               <div className="notes-head">
-                <div className="files-label">{notas.length} nota{notas.length !== 1 ? 's' : ''}</div>
+                <div className="files-label">{notas.length} apunte{notas.length !== 1 ? 's' : ''}</div>
                 <button className="btn btn-ghost xs" onClick={() => setNoteModal(true)}>
-                  <IconPlus /> Nueva nota
+                  <IconPlus /> Nuevo apunte
                 </button>
               </div>
               {loadNotas ? <SkeletonNotes /> : notas.length === 0 ? (
-                <EmptyState title="Sin notas aún"
+                <EmptyState title="Sin apuntes aún"
                   sub="Anota fórmulas, dudas o resúmenes que necesites recordar de esta materia." />
               ) : (
                 <div className="notes-grid">

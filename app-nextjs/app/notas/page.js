@@ -156,11 +156,11 @@ export default function NotasPage() {
         {/* Header */}
         <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:28, gap:16, flexWrap:'wrap' }}>
           <div>
-            <h1 style={{ fontFamily:'var(--font-serif)', fontSize:32, fontWeight:400, letterSpacing:'-0.025em', marginBottom:4 }}>Mis notas</h1>
-            <p style={{ fontSize:14, color:'var(--ink-3)', margin:0 }}>{notas.length} nota{notas.length!==1?'s':''} en total</p>
+            <h1 style={{ fontFamily:'var(--font-serif)', fontSize:32, fontWeight:400, letterSpacing:'-0.025em', marginBottom:4 }}>Mis apuntes</h1>
+            <p style={{ fontSize:14, color:'var(--ink-3)', margin:0 }}>{notas.length} apunte{notas.length!==1?'s':''} en total</p>
           </div>
           <button className="btn btn-primary" onClick={() => setCrearOpen(true)}>
-            <IconPlus /> Nueva nota
+            <IconPlus /> Nuevo apunte
           </button>
         </div>
 
@@ -192,9 +192,9 @@ export default function NotasPage() {
         {loading ? <SkeletonNotes /> : notasFiltradas.length === 0 ? (
           <div className="empty" style={{ marginTop: 16 }}>
             <div className="empty-art"><div className="empty-doc"/><div className="empty-doc"/><div className="empty-doc front"/></div>
-            <div className="empty-title">{notas.length === 0 ? 'Aún no tienes notas' : 'Sin resultados'}</div>
+            <div className="empty-title">{notas.length === 0 ? 'Aún no tienes apuntes' : 'Sin resultados'}</div>
             <div className="empty-sub">
-              {notas.length === 0 ? 'Crea tu primera nota con el botón de arriba.' : 'Intenta con otra búsqueda o filtro.'}
+              {notas.length === 0 ? 'Crea tu primer apunte con el botón de arriba.' : 'Intenta con otra búsqueda o filtro.'}
             </div>
           </div>
         ) : (

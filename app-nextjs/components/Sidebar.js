@@ -17,7 +17,7 @@ function IconX()       { return <svg width="16" height="16" viewBox="0 0 24 24" 
 const NAV = [
   { href: '/',             label: 'Dashboard',    icon: IconGrid },
   { href: '/materias',     label: 'Materias',     icon: IconLayers },
-  { href: '/notas',        label: 'Notas',        icon: IconFileText },
+  { href: '/notas',        label: 'Apuntes',      icon: IconFileText },
   { href: '/calendario',   label: 'Calendario',   icon: IconCalendar },
   { href: '/configuracion',label: 'Configuración',icon: IconSettings },
 ]
