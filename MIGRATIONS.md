@@ -48,6 +48,48 @@ UPDATE materias SET activa = true WHERE activa IS NULL;
 
 ---
 
+---
+
+## Migración 3 — RUT en configuracion_usuario
+
+```sql
+ALTER TABLE configuracion_usuario ADD COLUMN IF NOT EXISTS rut text;
+```
+
+---
+
+## Migración 4 — Tabla `ponderaciones`
+
+Almacena la estructura de evaluaciones y ponderaciones de cada materia (extraídas del cronograma o ingresadas manualmente por el usuario).
+
+```sql
+CREATE TABLE IF NOT EXISTS ponderaciones (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             uuid NOT NULL,
+  materia_id          uuid REFERENCES materias(id) ON DELETE CASCADE,
+  nombre_evaluacion   text NOT NULL,
+  porcentaje          numeric(5,2) NOT NULL DEFAULT 0,
+  tipo                text CHECK (tipo IN ('prueba','control','examen','tarea','quiz','laboratorio','proyecto','otro')) DEFAULT 'otro',
+  orden               integer DEFAULT 0,
+  nota_exencion       numeric(4,1),
+  created_at          timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ponderaciones_materia ON ponderaciones(materia_id);
+CREATE INDEX IF NOT EXISTS idx_ponderaciones_user    ON ponderaciones(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ponderaciones_unique
+  ON ponderaciones(user_id, materia_id, nombre_evaluacion);
+
+ALTER TABLE ponderaciones ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage their own ponderaciones"
+  ON ponderaciones FOR ALL
+  USING  (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+```
+
+---
+
 ## Nota — Campo `ponderacion` en `fechas_evaluaciones`
 
 El campo `analisis_material.fechas_evaluaciones` ahora incluye `ponderacion` (% de la nota final). No requiere migración de columna; es un cambio en el contenido JSONB generado por Gemini.
