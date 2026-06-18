@@ -28,6 +28,7 @@ function IconDownload()  { return <svg width="13" height="13" viewBox="0 0 24 24
 function IconEye()       { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> }
 function IconMod()       { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> }
 function IconStarFill()  { return <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> }
+function IconRefresh()   { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(iso) {
@@ -429,6 +430,14 @@ export default function MateriaPage() {
   // PDF preview
   const [pdfFile, setPdfFile] = useState(null)
 
+  // Materia DB id (para calculadora)
+  const [materiaDbId, setMateriaDbId] = useState(null)
+
+  // Calculadora de notas
+  const [calcRows,    setCalcRows]    = useState([])
+  const [calcLoaded,  setCalcLoaded]  = useState(false)
+  const [calcLoading, setCalcLoading] = useState(false)
+
   // Guards: prevent double-loading per tab
   const loadGuard = useRef({ material: false, grades: false, anuncios: false })
 
@@ -480,12 +489,84 @@ export default function MateriaPage() {
     if (data) setCalifDB(data)
   }, [nombre])
 
+  const cargarCalculadora = useCallback(async () => {
+    setCalcLoading(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setCalcLoading(false); return }
+
+    // Calificaciones Canvas para esta materia
+    const { data: califs } = await supabase
+      .from('calificaciones').select('*').eq('user_id', u.id).eq('materia', nombre)
+
+    // Ponderaciones desde análisis de cronogramas
+    let cronEvals = []
+    if (materiaDbId) {
+      const { data: analisis } = await supabase
+        .from('analisis_material')
+        .select('fechas_evaluaciones')
+        .eq('materia_id', materiaDbId)
+      if (analisis) {
+        cronEvals = analisis
+          .flatMap(a => (a.fechas_evaluaciones || []))
+          .filter(e => e.ponderacion && e.descripcion)
+      }
+    }
+
+    // Construir filas a partir de calificaciones reales
+    const rows = (califs || []).map(c => ({
+      id:           `c-${c.id}`,
+      nombre:       c.nombre,
+      ponderacion:  null,
+      nota_pct:     c.nota_maxima > 0 ? Math.round((c.nota / c.nota_maxima) * 100) : null,
+      simulada_pct: null,
+      source:       'canvas',
+    }))
+
+    // Intentar emparejar ponderaciones del cronograma
+    rows.forEach(row => {
+      const name = (row.nombre || '').toLowerCase()
+      for (const e of cronEvals) {
+        const desc = (e.descripcion || '').toLowerCase()
+        const matchWords = desc.split(' ').filter(w => w.length > 3)
+        if (matchWords.some(w => name.includes(w)) || name.split(' ').some(w => w.length > 3 && desc.includes(w))) {
+          row.ponderacion = e.ponderacion
+          break
+        }
+      }
+    })
+
+    // Añadir filas del cronograma sin calificacion real todavía
+    const usedDescs = new Set(rows.filter(r => r.ponderacion != null).map(r => r.nombre.toLowerCase()))
+    for (const e of cronEvals) {
+      const desc = (e.descripcion || '').toLowerCase()
+      const yaUsada = [...usedDescs].some(u => u.includes(desc.slice(0,6)) || desc.includes(u.slice(0,6)))
+      if (!yaUsada) {
+        rows.push({
+          id:           `e-${Math.random().toString(36).slice(2)}`,
+          nombre:       e.descripcion || e.tipo || 'Evaluación',
+          ponderacion:  e.ponderacion,
+          nota_pct:     null,
+          simulada_pct: null,
+          source:       'cronograma',
+        })
+        usedDescs.add(desc)
+      }
+    }
+
+    setCalcRows(rows)
+    setCalcLoaded(true)
+    setCalcLoading(false)
+  }, [nombre, materiaDbId])
+
   useEffect(() => {
     if (!ready || !user) return
-    // Load canvas_id
-    supabase.from('materias').select('canvas_id')
+    // Load canvas_id and materia DB id
+    supabase.from('materias').select('id, canvas_id')
       .eq('user_id', user.id).eq('nombre', nombre).maybeSingle()
-      .then(({ data }) => { if (data?.canvas_id) setCanvasId(data.canvas_id) })
+      .then(({ data }) => {
+        if (data?.canvas_id) setCanvasId(data.canvas_id)
+        if (data?.id)        setMateriaDbId(data.id)
+      })
     // Load Canvas credentials
     loadCanvasConfig(supabase, user.id).then(cfg => { if (cfg) setCanvasConfig(cfg) })
     // Load DB data
@@ -550,6 +631,10 @@ export default function MateriaPage() {
     if (tab === 'anuncios'       && !anunciosLoaded)  doLoadAnuncios(canvasId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, canvasId, canvasConfig?.url])
+
+  useEffect(() => {
+    if (tab === 'calculadora' && !calcLoaded && !calcLoading) cargarCalculadora()
+  }, [tab, calcLoaded, calcLoading, cargarCalculadora])
 
   // ── Actions ───────────────────────────────────────────────────────────────
   async function guardarNota() {
@@ -734,6 +819,9 @@ export default function MateriaPage() {
                 {anuncios.filter(a => a.read_state === 'unread').length}
               </span>
             )}
+          </button>
+          <button className={`tab${tab === 'calculadora' ? ' tab-active' : ''}`} onClick={() => setTab('calculadora')}>
+            <IconGrades /><span>Calculadora</span>
           </button>
         </div>
 
@@ -1193,6 +1281,44 @@ export default function MateriaPage() {
               )}
             </div>
           )}
+
+          {/* ── CALCULADORA ───────────────────────────────────────────── */}
+          {tab === 'calculadora' && (
+            <div>
+              <div className="section-head" style={{ marginBottom:20 }}>
+                <div>
+                  <div className="files-label">Calculadora de notas</div>
+                  <div style={{ fontSize:12, color:'var(--ink-4)', marginTop:2 }}>
+                    Ingresa ponderaciones y simula notas futuras. Los datos no se guardan.
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button className="btn btn-ghost xs" onClick={() => { setCalcLoaded(false); setCalcRows([]) }}>
+                    <IconRefresh /> Recargar
+                  </button>
+                  <button className="btn btn-ghost xs" onClick={() => setCalcRows(prev => [...prev, {
+                    id: `m-${Date.now()}`,
+                    nombre: 'Nueva evaluación',
+                    ponderacion: null,
+                    nota_pct: null,
+                    simulada_pct: null,
+                    source: 'manual',
+                  }])}>
+                    <IconPlus /> Agregar
+                  </button>
+                </div>
+              </div>
+
+              {calcLoading ? (
+                <div className="skeleton-list">{[1,2,3].map(i=><div key={i} className="skeleton-task"/>)}</div>
+              ) : (
+                <CalcPanel
+                  rows={calcRows}
+                  setRows={setCalcRows}
+                />
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -1227,6 +1353,179 @@ export default function MateriaPage() {
 }
 
 // ── FileRow ───────────────────────────────────────────────────────────────────
+// ── CalcPanel ─────────────────────────────────────────────────────────────────
+function CalcPanel({ rows, setRows }) {
+  const totalPond = rows.reduce((s, r) => s + (r.ponderacion ?? 0), 0)
+  const pondWarn  = rows.some(r => r.ponderacion != null) && Math.abs(totalPond - 100) > 1
+
+  const rowsConNota = rows.filter(r => r.nota_pct != null && r.ponderacion != null)
+  const promedioReal = rowsConNota.length > 0
+    ? rowsConNota.reduce((s, r) => s + r.nota_pct * r.ponderacion / 100, 0)
+    : null
+
+  const rowsConCualquier = rows.filter(r => (r.nota_pct != null || r.simulada_pct != null) && r.ponderacion != null)
+  const promedioSim = rowsConCualquier.length > 0
+    ? rowsConCualquier.reduce((s, r) => s + (r.nota_pct ?? r.simulada_pct) * r.ponderacion / 100, 0)
+    : null
+
+  const haySimuladas = rows.some(r => r.simulada_pct != null && r.nota_pct == null)
+
+  function update(id, field, value) {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
+  }
+
+  const cellStyle = { padding:'8px 10px', borderBottom:'1px solid var(--border-subtle,#f0ede8)', verticalAlign:'middle' }
+  const thStyle   = { padding:'7px 10px', fontWeight:600, fontSize:11, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--ink-4)', borderBottom:'2px solid var(--border,#e8e6e1)' }
+  const inputStyle = {
+    width:'100%', border:'1px solid var(--border)', borderRadius:6,
+    padding:'3px 6px', fontSize:13, background:'transparent',
+    outline:'none', textAlign:'center',
+  }
+
+  return (
+    <div>
+      <div style={{ overflowX:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, textAlign:'left' }}>Evaluación</th>
+              <th style={{ ...thStyle, textAlign:'center', width:90 }}>Pond. %</th>
+              <th style={{ ...thStyle, textAlign:'center', width:95 }}>Nota real</th>
+              <th style={{ ...thStyle, textAlign:'center', width:95 }}>Simular %</th>
+              <th style={{ ...thStyle, textAlign:'center', width:85 }}>Aporte</th>
+              <th style={{ ...thStyle, width:32 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ ...cellStyle, textAlign:'center', color:'var(--ink-4)', padding:'28px 10px' }}>
+                  Sin datos. Agrega evaluaciones manualmente o sincroniza desde Canvas.
+                </td>
+              </tr>
+            )}
+            {rows.map(row => {
+              const nota = row.nota_pct
+              const sim  = row.simulada_pct
+              const pond = row.ponderacion
+              const usada = nota ?? sim
+              const aporte = usada != null && pond != null
+                ? (usada * pond / 100).toFixed(1)
+                : null
+              const esSimulada = nota == null && sim != null
+              return (
+                <tr key={row.id}>
+                  <td style={{ ...cellStyle, textAlign:'left' }}>
+                    <input
+                      value={row.nombre}
+                      onChange={e => update(row.id, 'nombre', e.target.value)}
+                      style={{ ...inputStyle, textAlign:'left', border:'none', padding:'3px 0' }}
+                    />
+                    {row.source === 'cronograma' && (
+                      <span title="Del cronograma analizado" style={{ fontSize:10, color:'var(--ink-4)', marginLeft:4 }}>📅</span>
+                    )}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign:'center' }}>
+                    <input
+                      type="number" min="0" max="100" placeholder="—"
+                      value={pond ?? ''}
+                      onChange={e => update(row.id, 'ponderacion', e.target.value !== '' ? Number(e.target.value) : null)}
+                      style={{ ...inputStyle, width:60 }}
+                    />
+                  </td>
+                  <td style={{ ...cellStyle, textAlign:'center' }}>
+                    {nota != null ? (
+                      <span style={{ fontWeight:600, color: nota >= 60 ? 'var(--c-b)' : 'var(--c-d)' }}>
+                        {nota}%
+                      </span>
+                    ) : (
+                      <span style={{ color:'var(--ink-5)', fontSize:12 }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign:'center' }}>
+                    {nota == null ? (
+                      <input
+                        type="number" min="0" max="100" placeholder="0–100"
+                        value={sim ?? ''}
+                        onChange={e => update(row.id, 'simulada_pct', e.target.value !== '' ? Number(e.target.value) : null)}
+                        style={{ ...inputStyle, width:70, background: sim != null ? 'var(--c-a-light,#fef3c7)' : 'transparent' }}
+                      />
+                    ) : (
+                      <span style={{ color:'var(--ink-5)', fontSize:12 }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign:'center', fontWeight:600, color: aporte == null ? 'var(--ink-5)' : esSimulada ? '#92400e' : 'var(--ink-1)' }}>
+                    {aporte != null ? `${aporte}%` : '—'}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign:'center' }}>
+                    <button
+                      onClick={() => setRows(prev => prev.filter(r => r.id !== row.id))}
+                      style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ink-5)', fontSize:18, lineHeight:1, padding:'0 4px' }}
+                      title="Eliminar fila"
+                    >×</button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer con cálculos */}
+      {rows.length > 0 && (
+        <div style={{
+          marginTop:16, padding:'16px 20px', borderRadius:12,
+          background:'var(--surface-2,#f8f8f6)', border:'1px solid var(--border,#e8e6e1)',
+          display:'flex', flexWrap:'wrap', gap:20, alignItems:'flex-start',
+        }}>
+          {promedioReal != null && (
+            <div>
+              <div style={{ fontSize:11, textTransform:'uppercase', letterSpacing:'0.07em', color:'var(--ink-4)', marginBottom:4 }}>
+                Promedio con notas reales
+              </div>
+              <div style={{ fontSize:28, fontWeight:700, color: promedioReal >= 60 ? 'var(--c-b)' : 'var(--c-d)', lineHeight:1 }}>
+                {promedioReal.toFixed(1)}%
+              </div>
+              <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:3 }}>
+                {rowsConNota.length} evaluaci{rowsConNota.length !== 1 ? 'ones' : 'ón'} · {rowsConNota.reduce((s,r) => s + r.ponderacion, 0)}% ponderado
+              </div>
+            </div>
+          )}
+
+          {haySimuladas && promedioSim != null && (
+            <>
+              {promedioReal != null && <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />}
+              <div>
+                <div style={{ fontSize:11, textTransform:'uppercase', letterSpacing:'0.07em', color:'var(--ink-4)', marginBottom:4 }}>
+                  Proyección (con simuladas)
+                </div>
+                <div style={{ fontSize:28, fontWeight:700, color:'#92400e', lineHeight:1 }}>
+                  {promedioSim.toFixed(1)}%
+                </div>
+                <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:3 }}>
+                  {rowsConCualquier.length} evaluaci{rowsConCualquier.length !== 1 ? 'ones' : 'ón'} · {rowsConCualquier.reduce((s,r) => s + r.ponderacion, 0)}% ponderado
+                </div>
+              </div>
+            </>
+          )}
+
+          {promedioReal == null && !haySimuladas && (
+            <div style={{ fontSize:13, color:'var(--ink-4)' }}>
+              Ingresa ponderaciones (%) y notas o valores simulados para calcular el promedio.
+            </div>
+          )}
+
+          {pondWarn && (
+            <div style={{ width:'100%', fontSize:12, color:'var(--c-d)', marginTop:4 }}>
+              ⚠ Las ponderaciones suman {totalPond}% (debería ser 100%).
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FileRow({ f, onPreview }) {
   const syl = isSyllabus(f.display_name)
   return (
