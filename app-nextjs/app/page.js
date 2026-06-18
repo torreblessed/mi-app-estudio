@@ -105,8 +105,12 @@ function SubjectCard({ materia, onClick }) {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           {materia.promedio != null && (
-            <span className="foot-stat" style={{ fontSize:11, color: materia.promedio >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
-              {materia.promedio}%
+            <span className="foot-stat" style={{
+              fontSize:11,
+              fontWeight:600,
+              color: materia.promedio >= 5.0 ? 'var(--c-b,#22c55e)' : materia.promedio >= 4.0 ? '#ca8a04' : 'var(--c-d,#ef4444)',
+            }}>
+              {materia.promedio.toFixed(1)} ({materia.califCount} eval.)
             </span>
           )}
           <span className="foot-stat" style={{ fontSize: 11 }}>
@@ -224,7 +228,7 @@ function NoteModal({ onClose, onSave, materia, setMateria, titulo, setTitulo, co
             </div>
           </div>
           <button className="btn btn-primary" style={{ width:'100%', padding:'13px 18px' }} onClick={onSave} disabled={guardando}>
-            <IconSave />{guardando ? 'Guardando…' : 'Guardar nota'}
+            <IconSave />{guardando ? 'Guardando…' : 'Guardar apunte'}
           </button>
         </div>
       </div>
@@ -587,12 +591,12 @@ export default function HomePage() {
       }
     })
 
-    // Promedio por materia
+    // Promedio por materia (escala 1-7 chilena)
     const califSums = {}
     calificaciones.forEach(c => {
-      if (!c.materia || !c.nota_maxima) return
+      if (!c.materia || !c.nota_maxima || c.nota == null) return
       if (!califSums[c.materia]) califSums[c.materia] = { s: 0, n: 0 }
-      califSums[c.materia].s += (c.nota / c.nota_maxima) * 100
+      califSums[c.materia].s += 1 + (c.nota / c.nota_maxima) * 6
       califSums[c.materia].n += 1
     })
 
@@ -602,8 +606,9 @@ export default function HomePage() {
       color:     m.color || materiaColor(m.nombre),
       notasCount: notasCounts[m.nombre] || 0,
       nextEval:  nextEvalByMateria[m.nombre] || null,
+      califCount: califSums[m.nombre]?.n || 0,
       promedio:  califSums[m.nombre]
-        ? Math.round(califSums[m.nombre].s / califSums[m.nombre].n)
+        ? Math.round(califSums[m.nombre].s / califSums[m.nombre].n * 10) / 10
         : null,
     })).sort((a, b) => a.nombre.localeCompare(b.nombre))
   }, [allNotas, upcomingEvals, materiasTable, calificaciones])

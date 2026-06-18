@@ -70,6 +70,9 @@ export default function ConfiguracionPage() {
   const [user,  setUser]  = useState(null)
   const [ready, setReady] = useState(false)
 
+  // Perfil
+  const [rut,         setRut]         = useState('')
+
   // Canvas config
   const [canvasUrl,   setCanvasUrl]   = useState('')
   const [canvasToken, setCanvasToken] = useState('')
@@ -117,6 +120,7 @@ export default function ConfiguracionPage() {
         if (cfg.canvas_url)   setCanvasUrl(cfg.canvas_url)
         if (cfg.canvas_token) setCanvasToken(cfg.canvas_token)
         if (cfg.ultima_sync)  setLastSync(cfg.ultima_sync)
+        if (cfg.rut)          setRut(cfg.rut)
       }
       setReady(true)
     })
@@ -141,6 +145,7 @@ export default function ConfiguracionPage() {
     const { data: { user: u } } = await supabase.auth.getUser()
     const payload = {
       user_id: u.id,
+      rut:          rut.trim() || null,
       canvas_url:   canvasUrl.trim().replace(/\/$/, ''),
       canvas_token: canvasToken.trim(),
       updated_at:   new Date().toISOString(),
@@ -277,6 +282,26 @@ export default function ConfiguracionPage() {
             Configuración
           </h1>
           <p style={{ fontSize: 14, color: 'var(--ink-3)' }}>Conecta tu cuenta de Canvas LMS y personaliza la app.</p>
+        </div>
+
+        {/* ── Perfil ─────────────────────────────────────────────────────────── */}
+        <div className="config-section">
+          <div className="config-section-title">Perfil</div>
+          <div className="config-section-sub">
+            Tu RUT se usa para identificar tus notas automáticamente cuando analizas archivos de calificaciones del curso.
+          </div>
+          <div className="field">
+            <label className="label">RUT</label>
+            <div className="input-wrap">
+              <input type="text" placeholder="12.345.678-9"
+                value={rut} onChange={e => setRut(e.target.value)} style={{ paddingLeft: 14 }} />
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-primary sm" onClick={guardarConfig} disabled={saving}>
+              <IconSave />{saving ? 'Guardando…' : saved ? '¡Guardado!' : 'Guardar perfil'}
+            </button>
+          </div>
         </div>
 
         {/* ── Canvas LMS ─────────────────────────────────────────────────────── */}

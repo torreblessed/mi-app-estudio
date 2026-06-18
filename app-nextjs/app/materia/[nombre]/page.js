@@ -59,6 +59,22 @@ function daysLabel(n) {
   if (n === 1) return 'Mañana'
   return `En ${n} días`
 }
+function toNota7(nota, nota_maxima) {
+  if (!nota_maxima || nota == null) return null
+  return Math.round((1 + (nota / nota_maxima) * 6) * 10) / 10
+}
+function nota7Color(n) {
+  if (n == null) return 'var(--ink-4)'
+  if (n >= 5.0) return 'var(--c-b, #22c55e)'
+  if (n >= 4.0) return '#ca8a04'
+  return 'var(--c-d, #ef4444)'
+}
+function matchNombres(a, b) {
+  const words = s => (s || '').toLowerCase().split(/\s+/).filter(w => w.length > 3)
+  const wa = words(a); const wb = words(b)
+  return wa.some(w => (b || '').toLowerCase().includes(w)) ||
+         wb.some(w => (a || '').toLowerCase().includes(w))
+}
 function materiaColor(nombre) {
   if (!nombre) return 'a'
   const palette = ['a','b','c','d','e']
@@ -163,7 +179,7 @@ function NoteModal({ onClose, onSave, titulo, setTitulo, contenido, setContenido
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal">
         <div className="modal-head">
-          <div><h2 className="card-title">Nueva nota</h2><div className="card-sub">{materiaFija}</div></div>
+          <div><h2 className="card-title">Nuevo apunte</h2><div className="card-sub">{materiaFija}</div></div>
           <button className="modal-close" onClick={onClose}><IconX /></button>
         </div>
         <div className="card-fields">
@@ -182,7 +198,7 @@ function NoteModal({ onClose, onSave, titulo, setTitulo, contenido, setContenido
             </div>
           </div>
           <button className="btn btn-primary" style={{width:'100%',padding:'13px 18px'}} onClick={onSave} disabled={guardando}>
-            <IconSave />{guardando ? 'Guardando…' : 'Guardar nota'}
+            <IconSave />{guardando ? 'Guardando…' : 'Guardar apunte'}
           </button>
         </div>
       </div>
@@ -438,6 +454,15 @@ export default function MateriaPage() {
   const [calcLoaded,  setCalcLoaded]  = useState(false)
   const [calcLoading, setCalcLoading] = useState(false)
 
+  // Ponderaciones (tabla en Supabase)
+  const [ponderacionesDB, setPonderacionesDB]   = useState([])
+  const [pondLoaded,      setPondLoaded]        = useState(false)
+  const [pondLoading,     setPondLoading]       = useState(false)
+  const [pondRows,        setPondRows]          = useState([]) // local edit rows
+  const [simuladas7,      setSimuladas7]        = useState({}) // { nombre: nota_7 }
+  const [needMode,        setNeedMode]          = useState(false)
+  const [savingPonds,     setSavingPonds]       = useState(false)
+
   // Guards: prevent double-loading per tab
   const loadGuard = useRef({ material: false, grades: false, anuncios: false })
 
@@ -488,6 +513,60 @@ export default function MateriaPage() {
       .eq('user_id', u.id).eq('materia', nombre)
     if (data) setCalifDB(data)
   }, [nombre])
+
+  const cargarPonderaciones = useCallback(async (dbId) => {
+    const mid = dbId || materiaDbId
+    if (!mid) return
+    setPondLoading(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setPondLoading(false); return }
+    const { data } = await supabase.from('ponderaciones').select('*')
+      .eq('user_id', u.id).eq('materia_id', mid).order('orden')
+    const rows = (data ?? []).map(p => ({ ...p, _local: false }))
+    setPonderacionesDB(rows)
+    setPondRows(rows)
+    setPondLoaded(true)
+    setPondLoading(false)
+  }, [materiaDbId])
+
+  async function savePonderaciones() {
+    if (!materiaDbId) return
+    setSavingPonds(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) { setSavingPonds(false); return }
+
+    // Get existing IDs from DB
+    const { data: existingRows } = await supabase.from('ponderaciones')
+      .select('id').eq('user_id', u.id).eq('materia_id', materiaDbId)
+    const existingIds = new Set((existingRows || []).map(r => r.id))
+    const keepIds = new Set(pondRows.filter(r => r.id && !r._local).map(r => r.id))
+
+    // Delete removed rows
+    for (const id of existingIds) {
+      if (!keepIds.has(id)) {
+        await supabase.from('ponderaciones').delete().eq('id', id)
+      }
+    }
+
+    // Upsert current rows
+    for (let i = 0; i < pondRows.length; i++) {
+      const r = pondRows[i]
+      const payload = {
+        user_id: u.id, materia_id: materiaDbId,
+        nombre_evaluacion: r.nombre_evaluacion || 'Evaluación',
+        porcentaje: Number(r.porcentaje) || 0,
+        tipo: r.tipo || 'otro', orden: i,
+      }
+      if (r.id && !r._local) {
+        await supabase.from('ponderaciones').update(payload).eq('id', r.id)
+      } else {
+        await supabase.from('ponderaciones').insert(payload)
+      }
+    }
+
+    await cargarPonderaciones(materiaDbId)
+    setSavingPonds(false)
+  }
 
   const cargarCalculadora = useCallback(async () => {
     setCalcLoading(true)
@@ -636,6 +715,10 @@ export default function MateriaPage() {
     if (tab === 'calculadora' && !calcLoaded && !calcLoading) cargarCalculadora()
   }, [tab, calcLoaded, calcLoading, cargarCalculadora])
 
+  useEffect(() => {
+    if (tab === 'calificaciones' && materiaDbId && !pondLoaded && !pondLoading) cargarPonderaciones()
+  }, [tab, materiaDbId, pondLoaded, pondLoading, cargarPonderaciones])
+
   // ── Actions ───────────────────────────────────────────────────────────────
   async function guardarNota() {
     if (!noteTitulo.trim() || !noteContenido.trim()) { alert('Completa los campos'); return }
@@ -701,8 +784,9 @@ export default function MateriaPage() {
   const califMap = {}
   califDB.forEach(c => { if (c.canvas_id) califMap[c.canvas_id] = c })
 
-  const promedioCalif = califDB.length > 0
-    ? Math.round(califDB.reduce((s, c) => s + (c.nota_maxima > 0 ? (c.nota / c.nota_maxima) * 100 : 0), 0) / califDB.length)
+  const califConNota = califDB.filter(c => c.nota != null && c.nota_maxima > 0)
+  const promedioCalif7 = califConNota.length > 0
+    ? Math.round(califConNota.reduce((s, c) => s + toNota7(c.nota, c.nota_maxima), 0) / califConNota.length * 10) / 10
     : null
 
   function daysAway(fecha) {
@@ -760,7 +844,7 @@ export default function MateriaPage() {
             <div className="subj-stats-row">
               <div className="subj-stat">
                 <div className="subj-stat-num">{notas.length}</div>
-                <div className="subj-stat-label">Notas</div>
+                <div className="subj-stat-label">Apuntes</div>
               </div>
               <div className="subj-stat">
                 <div className="subj-stat-num">{tareasVig.length}</div>
@@ -770,10 +854,10 @@ export default function MateriaPage() {
                 <div className="subj-stat-num">{tareasPast.filter(t => t.completada).length}</div>
                 <div className="subj-stat-label">Completadas</div>
               </div>
-              {promedioCalif != null && (
+              {promedioCalif7 != null && (
                 <div className="subj-stat">
-                  <div className="subj-stat-num" style={{ color: promedioCalif >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
-                    {promedioCalif}%
+                  <div className="subj-stat-num" style={{ color: nota7Color(promedioCalif7) }}>
+                    {promedioCalif7.toFixed(1)}
                   </div>
                   <div className="subj-stat-label">Promedio</div>
                 </div>
@@ -819,9 +903,6 @@ export default function MateriaPage() {
                 {anuncios.filter(a => a.read_state === 'unread').length}
               </span>
             )}
-          </button>
-          <button className={`tab${tab === 'calculadora' ? ' tab-active' : ''}`} onClick={() => setTab('calculadora')}>
-            <IconGrades /><span>Calculadora</span>
           </button>
         </div>
 
@@ -940,139 +1021,288 @@ export default function MateriaPage() {
           )}
 
           {/* ── CALIFICACIONES ────────────────────────────────────────────── */}
-          {tab === 'calificaciones' && (
-            <div>
-              {/* No Canvas connection */}
-              {!canvasId && !canvasConfig && (
-                <EmptyState title="Sin conexión a Canvas"
-                  sub="Configura Canvas en Ajustes para ver tus calificaciones detalladas.">
-                  <button className="btn btn-primary sm" style={{ marginTop:16 }}
-                    onClick={() => router.push('/configuracion')}>
-                    Ir a Configuración
-                  </button>
-                </EmptyState>
-              )}
+          {tab === 'calificaciones' && (() => {
+            // Merge ponderaciones + calificaciones into display rows
+            const mergedRows = (() => {
+              const califs = califDB.filter(c => c.nota != null && c.nota_maxima > 0)
+              const usedCalifIds = new Set()
+              const rows = []
 
-              {(canvasId || canvasConfig) && loadGrades && (
-                <div className="skeleton-list">
-                  {[1,2,3,4].map(i => <div key={i} className="skeleton-task" style={{ height:64 }}/>)}
+              // Rows from ponderaciones table (with matched calificacion if any)
+              for (const p of pondRows) {
+                const match = califs.find(c => !usedCalifIds.has(c.id) && matchNombres(p.nombre_evaluacion, c.nombre))
+                if (match) usedCalifIds.add(match.id)
+                rows.push({
+                  key:       p.id || p._tmpId || p.nombre_evaluacion,
+                  nombre:    p.nombre_evaluacion,
+                  pond:      p.porcentaje,
+                  nota_7:    match ? toNota7(match.nota, match.nota_maxima) : null,
+                  nota_raw:  match ? `${match.nota}/${match.nota_maxima}` : null,
+                  fecha:     match?.fecha || null,
+                  pond_id:   p.id,
+                  calif_id:  match?.id || null,
+                  _local:    !!p._local,
+                })
+              }
+
+              // Remaining calificaciones without a matching ponderacion
+              for (const c of califs) {
+                if (!usedCalifIds.has(c.id)) {
+                  rows.push({
+                    key:      c.id,
+                    nombre:   c.nombre,
+                    pond:     null,
+                    nota_7:   toNota7(c.nota, c.nota_maxima),
+                    nota_raw: `${c.nota}/${c.nota_maxima}`,
+                    fecha:    c.fecha,
+                    pond_id:  null,
+                    calif_id: c.id,
+                    _local:   false,
+                  })
+                }
+              }
+              return rows
+            })()
+
+            const rowsConNota   = mergedRows.filter(r => r.nota_7 != null && r.pond != null)
+            const rowsConSim    = mergedRows.filter(r => r.nota_7 == null && simuladas7[r.nombre] != null && r.pond != null)
+            const pondTotal     = pondRows.reduce((s, p) => s + (Number(p.porcentaje) || 0), 0)
+            const pondWarn      = pondRows.length > 0 && Math.abs(pondTotal - 100) > 1
+
+            const promedioReal7 = rowsConNota.length > 0
+              ? rowsConNota.reduce((s, r) => s + r.nota_7 * r.pond / 100, 0) : null
+
+            const promedioSim7 = (rowsConNota.length > 0 || rowsConSim.length > 0) &&
+              (rowsConNota.length + rowsConSim.length) > 0
+              ? [...rowsConNota, ...rowsConSim].reduce((s, r) => {
+                  const nota = r.nota_7 ?? simuladas7[r.nombre]
+                  return s + nota * r.pond / 100
+                }, 0)
+              : null
+
+            // "¿Qué necesito?" calculation
+            const pendientesPond = pondRows
+              .filter(p => !mergedRows.find(r => r.pond_id === p.id && r.nota_7 != null))
+              .reduce((s, p) => s + (Number(p.porcentaje) || 0), 0)
+            const earnedSoFar   = promedioReal7 != null
+              ? rowsConNota.reduce((s, r) => s + r.nota_7 * r.pond / 100, 0) : 0
+            const neededAvg     = pendientesPond > 0
+              ? (4.0 - earnedSoFar) / (pendientesPond / 100) : null
+
+            const thS  = { padding:'7px 10px', fontWeight:600, fontSize:11, textTransform:'uppercase', letterSpacing:'0.06em', color:'var(--ink-4)', borderBottom:'2px solid var(--border,#e8e6e1)', whiteSpace:'nowrap' }
+            const tdS  = { padding:'9px 10px', borderBottom:'1px solid var(--border-subtle,#f0ede8)', verticalAlign:'middle', fontSize:13 }
+            const inpS = { width:'100%', border:'1px solid var(--border)', borderRadius:6, padding:'3px 8px', fontSize:13, background:'transparent', outline:'none', textAlign:'center' }
+
+            return (
+              <div>
+                {/* Top bar */}
+                <div className="section-head" style={{ marginBottom:20 }}>
+                  <div>
+                    <div className="files-label">Calificaciones — Escala 1.0 a 7.0</div>
+                    <div style={{ fontSize:12, color:'var(--ink-4)', marginTop:2 }}>
+                      Nota mínima de aprobación: 4.0 · {califDB.filter(c => c.nota != null).length} calificacion{califDB.filter(c => c.nota != null).length !== 1 ? 'es' : ''} importada{califDB.filter(c => c.nota != null).length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                    <button className="btn btn-ghost xs" style={{ fontSize:11 }}
+                      onClick={() => setNeedMode(m => !m)}>
+                      {needMode ? 'Ocultar' : '¿Qué necesito?'}
+                    </button>
+                    <button className="btn btn-ghost xs" onClick={() => setPondRows(p => [...p, {
+                      _local: true, _tmpId: `tmp-${Date.now()}`,
+                      nombre_evaluacion: 'Nueva evaluación', porcentaje: 0, tipo: 'otro', orden: p.length,
+                    }])}>
+                      <IconPlus /> Agregar
+                    </button>
+                    <button className="btn btn-primary xs" onClick={savePonderaciones} disabled={savingPonds}>
+                      <IconSave />{savingPonds ? 'Guardando…' : 'Guardar ponderaciones'}
+                    </button>
+                  </div>
                 </div>
-              )}
 
-              {(canvasId || canvasConfig) && !loadGrades && gradesError && (
-                <CanvasError msg={gradesError} router={router}
-                  onRetry={() => { loadGuard.current.grades = false; setGradesLoaded(false) }} />
-              )}
-
-              {(canvasId || canvasConfig) && !loadGrades && !gradesError && gradesLoaded && (
-                <>
-                  {/* Average banner */}
-                  {canvasGradeAvg != null && (
-                    <div style={{
-                      display:'flex', alignItems:'center', gap:20, padding:'20px 24px',
-                      background:'var(--surface-2,#f8f8f6)', borderRadius:12, marginBottom:28,
-                      border:'1px solid var(--border,#e8e6e1)',
-                    }}>
+                {/* Promedio banner */}
+                {(promedioReal7 != null || promedioSim7 != null) && (
+                  <div style={{ display:'flex', gap:24, padding:'16px 20px', background:'var(--surface-2,#f8f8f6)', borderRadius:12, marginBottom:20, border:'1px solid var(--border,#e8e6e1)', flexWrap:'wrap' }}>
+                    {promedioReal7 != null && (
                       <div>
-                        <div style={{ fontSize:11, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--ink-4)', marginBottom:4 }}>
-                          Promedio Canvas
-                        </div>
-                        <div style={{ fontSize:36, fontWeight:700, lineHeight:1, color: canvasGradeAvg >= 70 ? 'var(--c-b)' : 'var(--c-d)' }}>
-                          {canvasGradeAvg}%
-                        </div>
+                        <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--ink-4)', marginBottom:3 }}>Promedio actual</div>
+                        <div style={{ fontSize:32, fontWeight:700, lineHeight:1, color: nota7Color(promedioReal7) }}>{promedioReal7.toFixed(1)}</div>
+                        <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:3 }}>{rowsConNota.length} eval. calificada{rowsConNota.length !== 1 ? 's' : ''} · {rowsConNota.reduce((s,r)=>s+r.pond,0)}% ponderado</div>
                       </div>
-                      <div style={{ height:52, width:1, background:'var(--border,#e8e6e1)' }} />
-                      <div style={{ fontSize:13, color:'var(--ink-3)' }}>
-                        <div>{gradedAssignments.length} evaluaci{gradedAssignments.length !== 1 ? 'ones' : 'ón'} calificada{gradedAssignments.length !== 1 ? 's' : ''}</div>
-                        {ungradedUpcoming.length > 0 && (
-                          <div style={{ marginTop:4 }}>{ungradedUpcoming.length} pendiente{ungradedUpcoming.length !== 1 ? 's' : ''} sin calificar</div>
+                    )}
+                    {promedioSim7 != null && rowsConSim.length > 0 && (
+                      <>
+                        {promedioReal7 != null && <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />}
+                        <div>
+                          <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:'0.08em', color:'var(--ink-4)', marginBottom:3 }}>Promedio simulado</div>
+                          <div style={{ fontSize:32, fontWeight:700, lineHeight:1, color: nota7Color(promedioSim7) }}>{promedioSim7.toFixed(1)}</div>
+                          <div style={{ fontSize:11, color:'#92400e', marginTop:3 }}>con {rowsConSim.length} nota{rowsConSim.length !== 1 ? 's' : ''} simulada{rowsConSim.length !== 1 ? 's' : ''}</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ¿Qué necesito? */}
+                {needMode && pondRows.length > 0 && (
+                  <div style={{ padding:'14px 18px', background:'#fffbeb', borderRadius:10, border:'1px solid #fde68a', marginBottom:20, fontSize:13 }}>
+                    <div style={{ fontWeight:600, marginBottom:6 }}>¿Qué necesito para aprobar (4.0)?</div>
+                    {neededAvg == null && <div style={{ color:'var(--ink-3)' }}>No hay evaluaciones pendientes con ponderación definida.</div>}
+                    {neededAvg != null && neededAvg <= 1.0 && <div style={{ color:'var(--c-b)' }}>¡Ya apruebas aunque saques 1.0 en todo lo que resta!</div>}
+                    {neededAvg != null && neededAvg > 7.0 && <div style={{ color:'var(--c-d)' }}>Ya no es posible llegar a 4.0 en las evaluaciones restantes ({pendientesPond}% ponderado).</div>}
+                    {neededAvg != null && neededAvg > 1.0 && neededAvg <= 7.0 && (
+                      <div>Necesitas sacar en promedio{' '}
+                        <strong style={{ color: nota7Color(neededAvg), fontSize:15 }}>{neededAvg.toFixed(1)}</strong>
+                        {' '}en las evaluaciones pendientes ({pendientesPond.toFixed(0)}% de ponderación restante).
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Ponderaciones warning */}
+                {pondWarn && (
+                  <div style={{ fontSize:12, color:'#92400e', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:8, padding:'7px 12px', marginBottom:14 }}>
+                    Las ponderaciones suman {pondTotal.toFixed(0)}% (deberían sumar 100%).
+                  </div>
+                )}
+
+                {/* Loading */}
+                {pondLoading && (
+                  <div className="skeleton-list">{[1,2,3].map(i=><div key={i} className="skeleton-task"/>)}</div>
+                )}
+
+                {/* Table */}
+                {!pondLoading && (
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...thS, textAlign:'left' }}>Evaluación</th>
+                          <th style={{ ...thS, textAlign:'center', width:80 }}>Pond. %</th>
+                          <th style={{ ...thS, textAlign:'center', width:90 }}>Nota real</th>
+                          <th style={{ ...thS, textAlign:'center', width:90 }}>Simular</th>
+                          <th style={{ ...thS, textAlign:'center', width:80 }}>Aporte</th>
+                          <th style={{ ...thS, width:32 }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mergedRows.length === 0 && pondRows.length === 0 && (
+                          <tr>
+                            <td colSpan={6} style={{ ...tdS, textAlign:'center', color:'var(--ink-4)', padding:'28px 10px' }}>
+                              Sincroniza desde Canvas o agrega ponderaciones manualmente.
+                            </td>
+                          </tr>
                         )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Graded list */}
-                  {gradedAssignments.length > 0 && (
-                    <div style={{ marginBottom:32 }}>
-                      <div className="eyebrow" style={{ marginBottom:12 }}>Calificadas</div>
-                      <ul className="task-list">
-                        {gradedAssignments.map(a => {
-                          const pct = Math.round((a.submission.score / a.points_possible) * 100)
-                          const ok  = pct >= 70
+                        {mergedRows.map((row, i) => {
+                          const nota7   = row.nota_7
+                          const sim7    = simuladas7[row.nombre]
+                          const usada7  = nota7 ?? sim7
+                          const aporte  = usada7 != null && row.pond != null ? usada7 * row.pond / 100 : null
+                          const isLocal = !row.pond_id
                           return (
-                            <li key={a.id} className="task" style={{ alignItems:'center', gap:12 }}>
-                              <div style={{ flexShrink:0 }}>
-                                <div style={{
-                                  width:38, height:38, borderRadius:8,
-                                  background: ok ? 'var(--c-b-light,#d1fae5)' : 'var(--c-d-light,#ffe4e6)',
-                                  display:'flex', alignItems:'center', justifyContent:'center',
-                                  fontSize:13, fontWeight:700,
-                                  color: ok ? '#065f46' : '#9f1239',
-                                }}>
-                                  {pct}%
-                                </div>
-                              </div>
-                              <div className="task-main">
-                                <div className="task-title" style={{ fontSize:13 }}>{a.name}</div>
-                                <div className="task-meta">
-                                  <span>{a.submission.score}/{a.points_possible} pts</span>
-                                  {a.due_at && <><span className="meta-sep">·</span><span>{formatShort(a.due_at.slice(0,10))}</span></>}
-                                  {a.submission.submitted_at && (
-                                    <><span className="meta-sep">·</span>
-                                    <span style={{ color: a.submission.late ? 'var(--c-d)' : 'var(--ink-3)' }}>
-                                      {a.submission.late ? 'Con retraso' : 'Entregado'}
-                                    </span></>
-                                  )}
-                                </div>
-                                {/* Grade bar */}
-                                <div style={{ marginTop:5, width:'100%', maxWidth:200, height:4, background:'var(--ink-6,#e8e6e1)', borderRadius:2, overflow:'hidden' }}>
-                                  <div style={{ width:`${Math.min(pct,100)}%`, height:'100%', background: ok ? 'var(--c-b)' : 'var(--c-d)', borderRadius:2, transition:'width .3s' }} />
-                                </div>
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Upcoming ungraded */}
-                  {ungradedUpcoming.length > 0 && (
-                    <div>
-                      <div className="eyebrow" style={{ marginBottom:12 }}>Próximas sin calificar</div>
-                      <ul className="task-list">
-                        {ungradedUpcoming.sort((a,b) => a.due_at.localeCompare(b.due_at)).map(a => {
-                          const days = daysAway(a.due_at.slice(0,10))
-                          const urgent = days <= 3
-                          return (
-                            <li key={a.id} className="task">
-                              <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--ink-4)', flexShrink:0 }} />
-                              <div className="task-main">
-                                <div className="task-title" style={{ fontSize:13 }}>{a.name}</div>
-                                {a.due_at && (
-                                  <div className="task-meta">
-                                    <IconCalendar /> <span>{formatShort(a.due_at.slice(0,10))}</span>
-                                  </div>
+                            <tr key={row.key}>
+                              <td style={{ ...tdS, textAlign:'left' }}>
+                                <div style={{ fontWeight: nota7 != null ? 500 : 400 }}>{row.nombre}</div>
+                                {row.nota_raw && <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:1 }}>{row.nota_raw} pts · {row.fecha ? formatShort(row.fecha) : ''}</div>}
+                                {isLocal && <span style={{ fontSize:10, color:'var(--ink-4)' }}>sin ponderación</span>}
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                {row.pond_id != null ? (
+                                  <input type="number" min="0" max="100" placeholder="0"
+                                    value={pondRows.find(p => p.id === row.pond_id || p._tmpId === row.pond_id)?.porcentaje ?? ''}
+                                    onChange={e => setPondRows(prev => prev.map(p =>
+                                      (p.id === row.pond_id || p._tmpId === row.pond_id)
+                                        ? { ...p, porcentaje: e.target.value !== '' ? Number(e.target.value) : 0 }
+                                        : p
+                                    ))}
+                                    style={{ ...inpS, width:56 }} />
+                                ) : (
+                                  <span style={{ color:'var(--ink-5)' }}>—</span>
                                 )}
-                              </div>
-                              {a.due_at && (
-                                <span className={urgent ? 'urgent-text' : 'task-time'}>{daysLabel(days)}</span>
-                              )}
-                            </li>
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                {nota7 != null ? (
+                                  <span style={{ fontWeight:700, color: nota7Color(nota7) }}>{nota7.toFixed(1)}</span>
+                                ) : (
+                                  <span style={{ color:'var(--ink-5)' }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                {nota7 == null ? (
+                                  <input type="number" min="1" max="7" step="0.1" placeholder="1–7"
+                                    value={sim7 ?? ''}
+                                    onChange={e => setSimuladas7(prev => ({
+                                      ...prev,
+                                      [row.nombre]: e.target.value !== '' ? Number(e.target.value) : undefined,
+                                    }))}
+                                    style={{ ...inpS, width:60, background: sim7 != null ? '#fef3c7' : 'transparent' }} />
+                                ) : (
+                                  <span style={{ color:'var(--ink-5)' }}>—</span>
+                                )}
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center', fontWeight:600,
+                                color: aporte == null ? 'var(--ink-5)' : nota7 == null ? '#92400e' : 'var(--ink-1)' }}>
+                                {aporte != null ? aporte.toFixed(2) : '—'}
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                {row.pond_id != null && (
+                                  <button onClick={() => setPondRows(prev => prev.filter(p => p.id !== row.pond_id && p._tmpId !== row.pond_id))}
+                                    style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ink-5)', fontSize:18, lineHeight:1, padding:'0 4px' }}>×</button>
+                                )}
+                              </td>
+                            </tr>
                           )
                         })}
-                      </ul>
-                    </div>
-                  )}
-
-                  {gradedAssignments.length === 0 && ungradedUpcoming.length === 0 && (
-                    <EmptyState title="Sin evaluaciones en Canvas"
-                      sub="No se encontraron evaluaciones para este curso." />
-                  )}
-                </>
-              )}
-            </div>
-          )}
+                        {/* pondRows without a match in mergedRows (unmatched ponderaciones) */}
+                        {pondRows.filter(p => !mergedRows.find(r => r.pond_id === p.id || r.pond_id === p._tmpId)).map((p) => {
+                          const key = p.id || p._tmpId
+                          const sim7 = simuladas7[p.nombre_evaluacion]
+                          const aporte = sim7 != null ? sim7 * Number(p.porcentaje) / 100 : null
+                          return (
+                            <tr key={key}>
+                              <td style={{ ...tdS, textAlign:'left' }}>
+                                <input value={p.nombre_evaluacion}
+                                  onChange={e => setPondRows(prev => prev.map(r =>
+                                    (r.id === p.id || r._tmpId === p._tmpId) ? { ...r, nombre_evaluacion: e.target.value } : r
+                                  ))}
+                                  style={{ ...inpS, textAlign:'left', border:'none', padding:'3px 0' }} />
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                <input type="number" min="0" max="100" placeholder="0"
+                                  value={p.porcentaje ?? ''}
+                                  onChange={e => setPondRows(prev => prev.map(r =>
+                                    (r.id === p.id || r._tmpId === p._tmpId)
+                                      ? { ...r, porcentaje: e.target.value !== '' ? Number(e.target.value) : 0 } : r
+                                  ))}
+                                  style={{ ...inpS, width:56 }} />
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}><span style={{ color:'var(--ink-5)' }}>—</span></td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                <input type="number" min="1" max="7" step="0.1" placeholder="1–7"
+                                  value={sim7 ?? ''}
+                                  onChange={e => setSimuladas7(prev => ({
+                                    ...prev,
+                                    [p.nombre_evaluacion]: e.target.value !== '' ? Number(e.target.value) : undefined,
+                                  }))}
+                                  style={{ ...inpS, width:60, background: sim7 != null ? '#fef3c7' : 'transparent' }} />
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center', fontWeight:600, color: aporte == null ? 'var(--ink-5)' : '#92400e' }}>
+                                {aporte != null ? aporte.toFixed(2) : '—'}
+                              </td>
+                              <td style={{ ...tdS, textAlign:'center' }}>
+                                <button onClick={() => setPondRows(prev => prev.filter(r => r.id !== p.id && r._tmpId !== p._tmpId))}
+                                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ink-5)', fontSize:18, lineHeight:1, padding:'0 4px' }}>×</button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── MATERIAL ──────────────────────────────────────────────────── */}
           {tab === 'material' && (
@@ -1282,49 +1512,12 @@ export default function MateriaPage() {
             </div>
           )}
 
-          {/* ── CALCULADORA ───────────────────────────────────────────── */}
-          {tab === 'calculadora' && (
-            <div>
-              <div className="section-head" style={{ marginBottom:20 }}>
-                <div>
-                  <div className="files-label">Calculadora de notas</div>
-                  <div style={{ fontSize:12, color:'var(--ink-4)', marginTop:2 }}>
-                    Ingresa ponderaciones y simula notas futuras. Los datos no se guardan.
-                  </div>
-                </div>
-                <div style={{ display:'flex', gap:8 }}>
-                  <button className="btn btn-ghost xs" onClick={() => { setCalcLoaded(false); setCalcRows([]) }}>
-                    <IconRefresh /> Recargar
-                  </button>
-                  <button className="btn btn-ghost xs" onClick={() => setCalcRows(prev => [...prev, {
-                    id: `m-${Date.now()}`,
-                    nombre: 'Nueva evaluación',
-                    ponderacion: null,
-                    nota_pct: null,
-                    simulada_pct: null,
-                    source: 'manual',
-                  }])}>
-                    <IconPlus /> Agregar
-                  </button>
-                </div>
-              </div>
-
-              {calcLoading ? (
-                <div className="skeleton-list">{[1,2,3].map(i=><div key={i} className="skeleton-task"/>)}</div>
-              ) : (
-                <CalcPanel
-                  rows={calcRows}
-                  setRows={setCalcRows}
-                />
-              )}
-            </div>
-          )}
         </div>
       </main>
 
       {/* FAB */}
       <button className="fab" onClick={() => setNoteModal(true)}>
-        <IconPlus /><span>Nueva nota</span>
+        <IconPlus /><span>Nuevo apunte</span>
       </button>
 
       {noteModal && (
