@@ -29,6 +29,20 @@ export function canAnalyzeFile(mimeType, fileName) {
   return false
 }
 
+// Prioridad de archivo: menor número = más relevante para analizar primero
+function filePriority(fileName) {
+  const n = (fileName || '').toLowerCase()
+  if (n.includes('temario') || n.includes('cronograma'))                              return 0
+  if (n.includes('programa') || n.includes('pauta') || n.includes('syllabus'))        return 1
+  if (n.includes('ayudant'))                                                           return 2
+  if (n.includes('guia') || n.includes('guía') || n.includes('ejercicio') || n.includes('taller')) return 3
+  if (n.includes('ppt') || n.includes('presentaci'))                                  return 4
+  return 5
+}
+
+const MAX_FILES_PER_MATERIA = 10
+const TIMEOUT_MS = 30_000
+
 // ── Motor de análisis principal ───────────────────────────────────────────────
 
 export async function analizarMateriales(userId, supabaseClient, canvasConfig, callbacks = {}) {
@@ -39,12 +53,12 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
   // 1. Obtener materias con canvas_id
   const { data: materias, error: matErr } = await supabaseClient
     .from('materias').select('id, nombre, canvas_id')
-    .eq('user_id', userId).not('canvas_id', 'is', null)
+    .eq('user_id', userId).not('canvas_id', 'is', null).neq('activa', false)
 
   if (matErr || !materias?.length) {
     log('No hay materias sincronizadas con Canvas.')
     pct(100)
-    return { totalAnalizados: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
+    return { totalAnalizados: 0, totalFallidos: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
   }
 
   // 2. IDs ya analizados (para no duplicar)
@@ -55,18 +69,29 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
   log(`Revisando archivos de ${materias.length} materia(s)…`)
   pct(5)
 
-  // 3. Recolectar archivos pendientes
+  // 3. Recolectar archivos pendientes (máx 10 por materia, priorizados)
   const pending = []
   for (const materia of materias) {
     try {
       const files = await getCourseFiles(canvasConfig.url, canvasConfig.token, materia.canvas_id)
       if (!Array.isArray(files)) continue
-      for (const f of files) {
-        if (!analizadosSet.has(Number(f.id)) && canAnalyzeFile(f['content-type'], f.display_name)) {
-          pending.push({ file: f, materia })
-        }
+
+      const eligible = files.filter(f =>
+        !analizadosSet.has(Number(f.id)) && canAnalyzeFile(f['content-type'], f.display_name)
+      )
+
+      // Ordenar por prioridad y tomar los primeros MAX_FILES_PER_MATERIA
+      eligible.sort((a, b) => filePriority(a.display_name) - filePriority(b.display_name))
+      const selected = eligible.slice(0, MAX_FILES_PER_MATERIA)
+
+      if (eligible.length > MAX_FILES_PER_MATERIA) {
+        log(`  ${materia.nombre}: ${selected.length} de ${eligible.length} archivos seleccionados (resto disponible para análisis manual)`)
       }
+
+      for (const f of selected) pending.push({ file: f, materia })
     } catch (err) {
+      // Silenciar errores 403 (sin acceso al curso)
+      if (err.message.includes('403')) continue
       log(`⚠ Error obteniendo archivos de ${materia.nombre}: ${err.message}`)
     }
   }
@@ -74,27 +99,31 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
   if (!pending.length) {
     log('Todos los archivos ya fueron analizados anteriormente.')
     pct(100)
-    return { totalAnalizados: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
+    return { totalAnalizados: 0, totalFallidos: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
   }
 
-  log(`Encontré ${pending.length} archivo(s) nuevo(s) para analizar.`)
+  log(`${pending.length} archivo(s) nuevo(s) para analizar.`)
   pct(10)
 
-  let totalAnalizados = 0
+  let totalAnalizados  = 0
+  let totalFallidos    = 0
   let totalFlashcards  = 0
   let totalEvaluaciones = 0
 
-  // 4. Analizar cada archivo
+  // 4. Analizar cada archivo con timeout de 30 s
   for (let i = 0; i < pending.length; i++) {
     const { file, materia } = pending[i]
     pct(10 + Math.round((i / pending.length) * 85))
     log(`[${i + 1}/${pending.length}] ${file.display_name}`)
 
+    const controller = new AbortController()
+    const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
     try {
       const res = await fetch('/api/analizar-material', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type':   'application/json',
           'x-canvas-url':   canvasConfig.url,
           'x-canvas-token': canvasConfig.token,
         },
@@ -105,11 +134,13 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
           materia:  materia.nombre,
           fileSize: file.size,
         }),
+        signal: controller.signal,
       })
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         log(`  ⚠ Saltado: ${err.error || `HTTP ${res.status}`}`)
+        totalFallidos++
         continue
       }
 
@@ -133,6 +164,7 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
 
       if (saveErr) {
         log(`  ⚠ Error guardando: ${saveErr.message}`)
+        totalFallidos++
       } else {
         totalAnalizados++
         const fc = (analysis.flashcards          || []).length
@@ -142,10 +174,22 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         log(`  ✓ ${analysis.tipo_material || 'otro'} · ${fc} flashcards · ${ev} evaluaci${ev !== 1 ? 'ones' : 'ón'}`)
       }
     } catch (err) {
-      log(`  ✗ ${err.message}`)
+      if (err.name === 'AbortError') {
+        log(`  ⏱ Timeout (30 s) — saltado`)
+      } else {
+        log(`  ✗ ${err.message}`)
+      }
+      totalFallidos++
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
   pct(100)
-  return { totalAnalizados, totalFlashcards, totalEvaluaciones, totalArchivos: pending.length }
+  log(`\n── Resumen ──────────────────────────────────────`)
+  log(`📁 Analizados: ${totalAnalizados} de ${pending.length}${totalFallidos ? ` · Fallidos: ${totalFallidos}` : ''}`)
+  log(`🃏 Flashcards generadas: ${totalFlashcards}`)
+  log(`📅 Fechas de evaluación: ${totalEvaluaciones}`)
+
+  return { totalAnalizados, totalFallidos, totalFlashcards, totalEvaluaciones, totalArchivos: pending.length }
 }

@@ -455,13 +455,18 @@ function AnalyzeModal({ running, pct, log, result, onClose }) {
                 <>
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--ink-1)' }}>
                     ✓ Analicé {result.totalAnalizados} de {result.totalArchivos} archivo{result.totalArchivos !== 1 ? 's' : ''}
+                    {result.totalFallidos > 0 && (
+                      <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--c-d,#e11d48)', marginLeft: 8 }}>
+                        ({result.totalFallidos} fallido{result.totalFallidos !== 1 ? 's' : ''})
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 20, fontSize: 13, color: 'var(--ink-3)', flexWrap: 'wrap' }}>
                     {result.totalFlashcards > 0 && (
                       <span>🃏 {result.totalFlashcards} flashcard{result.totalFlashcards !== 1 ? 's' : ''} generada{result.totalFlashcards !== 1 ? 's' : ''}</span>
                     )}
                     {result.totalEvaluaciones > 0 && (
-                      <span>📅 {result.totalEvaluaciones} evaluaci{result.totalEvaluaciones !== 1 ? 'ones' : 'ón'} detectada{result.totalEvaluaciones !== 1 ? 's' : ''}</span>
+                      <span>📅 {result.totalEvaluaciones} fecha{result.totalEvaluaciones !== 1 ? 's' : ''} de evaluación detectada{result.totalEvaluaciones !== 1 ? 's' : ''}</span>
                     )}
                     {result.totalFlashcards === 0 && result.totalEvaluaciones === 0 && result.totalAnalizados > 0 && (
                       <span style={{ color: 'var(--ink-4)' }}>Sin fechas ni flashcards detectadas en este material.</span>
@@ -717,7 +722,7 @@ export default function HomePage() {
     const { data: { user: u } } = await supabase.auth.getUser()
     if (!u) { setLoadingMaterias(false); return }
     const { data, error } = await supabase
-      .from('materias').select('*').eq('user_id', u.id).order('nombre')
+      .from('materias').select('*').eq('user_id', u.id).neq('activa', false).order('nombre')
     console.log('[Materias] cargadas:', data?.length ?? 0, error?.message ?? 'ok')
     setMateriasTable(data ?? [])
     setLoadingMaterias(false)

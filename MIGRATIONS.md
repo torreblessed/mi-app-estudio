@@ -34,3 +34,30 @@ create policy "Users manage their own analysis"
   using  (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 ```
+
+---
+
+## Migración 2 — Columna `activa` en materias
+
+Permite marcar qué materias estás cursando actualmente. Solo las activas aparecen en el dashboard, calendario y son analizadas por el motor IA.
+
+```sql
+ALTER TABLE materias ADD COLUMN IF NOT EXISTS activa boolean DEFAULT true;
+UPDATE materias SET activa = true WHERE activa IS NULL;
+```
+
+---
+
+## Nota — Campo `ponderacion` en `fechas_evaluaciones`
+
+El campo `analisis_material.fechas_evaluaciones` ahora incluye `ponderacion` (% de la nota final). No requiere migración de columna; es un cambio en el contenido JSONB generado por Gemini.
+
+```json
+{
+  "tipo": "prueba",
+  "fecha": "2025-04-15",
+  "temas_incluidos": ["derivadas"],
+  "descripcion": "Prueba 2 — Integración",
+  "ponderacion": 25
+}
+```

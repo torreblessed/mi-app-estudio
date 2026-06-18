@@ -71,7 +71,7 @@ export default function MateriasPage() {
         .in('tipo', ['prueba','entrega','quiz'])
         .gte('fecha', new Date().toISOString().slice(0,10))
         .order('fecha', { ascending: true }),
-      supabase.from('materias').select('*').eq('user_id', u.id).order('nombre'),
+      supabase.from('materias').select('*').eq('user_id', u.id).neq('activa', false).order('nombre'),
     ])
 
     if (!notasRes.error) setAllNotas(notasRes.data ?? [])
