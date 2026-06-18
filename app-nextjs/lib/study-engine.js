@@ -29,15 +29,29 @@ export function canAnalyzeFile(mimeType, fileName) {
   return false
 }
 
-// Prioridad de archivo: menor número = más relevante para analizar primero
+// Detecta si el archivo es un cronograma/programa (siempre se procesa primero)
+function isCronograma(fileName) {
+  const n = (fileName || '').toLowerCase()
+  return n.includes('cronograma') || n.includes('calendario') || n.includes('programa') ||
+    n.includes('syllabus') || n.includes('planificaci') || n.includes('fechas') ||
+    n.includes('evaluaciones') || n.includes('temario')
+}
+
+// Detecta si el archivo es de calificaciones/notas (prompt especial)
+function isGradeFile(fileName) {
+  const n = (fileName || '').toLowerCase()
+  return n.includes('notas') || n.includes('calificaciones') || n.includes('pauta') ||
+    n.includes('resultados') || n.includes('acta') || n.includes('corrección') ||
+    n.includes('correccion')
+}
+
+// Prioridad de archivo dentro del lote no-cronograma: menor número = más relevante
 function filePriority(fileName) {
   const n = (fileName || '').toLowerCase()
-  if (n.includes('temario') || n.includes('cronograma'))                              return 0
-  if (n.includes('programa') || n.includes('pauta') || n.includes('syllabus'))        return 1
-  if (n.includes('ayudant'))                                                           return 2
-  if (n.includes('guia') || n.includes('guía') || n.includes('ejercicio') || n.includes('taller')) return 3
-  if (n.includes('ppt') || n.includes('presentaci'))                                  return 4
-  return 5
+  if (n.includes('ayudant'))                                                           return 0
+  if (n.includes('guia') || n.includes('guía') || n.includes('ejercicio') || n.includes('taller')) return 1
+  if (n.includes('ppt') || n.includes('presentaci'))                                  return 2
+  return 3
 }
 
 const MAX_FILES_PER_MATERIA = 10
@@ -50,13 +64,13 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
   const log = msg => { console.log('[StudyEngine]', msg); onLog?.(msg) }
   const pct = n   => onProgress?.(n)
 
-  // 1. Obtener materias con canvas_id
+  // 1. Obtener materias activas con canvas_id
   const { data: materias, error: matErr } = await supabaseClient
     .from('materias').select('id, nombre, canvas_id')
     .eq('user_id', userId).not('canvas_id', 'is', null).neq('activa', false)
 
   if (matErr || !materias?.length) {
-    log('No hay materias sincronizadas con Canvas.')
+    log('No hay materias activas sincronizadas con Canvas.')
     pct(100)
     return { totalAnalizados: 0, totalFallidos: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
   }
@@ -66,11 +80,14 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
     .from('analisis_material').select('archivo_canvas_id').eq('user_id', userId)
   const analizadosSet = new Set((yaAnalizados || []).map(a => Number(a.archivo_canvas_id)))
 
-  log(`Revisando archivos de ${materias.length} materia(s)…`)
+  log(`Revisando archivos de ${materias.length} materia(s) activa(s)…`)
   pct(5)
 
-  // 3. Recolectar archivos pendientes (máx 10 por materia, priorizados)
-  const pending = []
+  // 3. Recolectar archivos pendientes
+  // Cronogramas siempre primero (sin límite propio); resto: máx MAX_FILES_PER_MATERIA por materia
+  const cronogramasPending = []
+  const otrosPending       = []
+
   for (const materia of materias) {
     try {
       const files = await getCourseFiles(canvasConfig.url, canvasConfig.token, materia.canvas_id)
@@ -80,21 +97,34 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         !analizadosSet.has(Number(f.id)) && canAnalyzeFile(f['content-type'], f.display_name)
       )
 
-      // Ordenar por prioridad y tomar los primeros MAX_FILES_PER_MATERIA
-      eligible.sort((a, b) => filePriority(a.display_name) - filePriority(b.display_name))
-      const selected = eligible.slice(0, MAX_FILES_PER_MATERIA)
+      const cronos = eligible.filter(f => isCronograma(f.display_name))
+      const otros  = eligible.filter(f => !isCronograma(f.display_name))
 
-      if (eligible.length > MAX_FILES_PER_MATERIA) {
-        log(`  ${materia.nombre}: ${selected.length} de ${eligible.length} archivos seleccionados (resto disponible para análisis manual)`)
+      // Cronogramas: todos siempre
+      cronos.forEach(f => cronogramasPending.push({ file: f, materia, promptType: 'cronograma' }))
+
+      // Otros: ordenar por prioridad, limitar a MAX_FILES_PER_MATERIA
+      otros.sort((a, b) => filePriority(a.display_name) - filePriority(b.display_name))
+      const seleccionados = otros.slice(0, MAX_FILES_PER_MATERIA)
+
+      seleccionados.forEach(f => {
+        const pType = isGradeFile(f.display_name) ? 'notas' : null
+        otrosPending.push({ file: f, materia, promptType: pType })
+      })
+
+      if (otros.length > MAX_FILES_PER_MATERIA) {
+        log(`  ${materia.nombre}: ${seleccionados.length} de ${otros.length} archivos regulares seleccionados`)
       }
-
-      for (const f of selected) pending.push({ file: f, materia })
+      if (cronos.length > 0) {
+        log(`  ${materia.nombre}: ${cronos.length} cronograma(s) — se analizan siempre primero`)
+      }
     } catch (err) {
-      // Silenciar errores 403 (sin acceso al curso)
-      if (err.message.includes('403')) continue
+      if (err.message.includes('403')) continue  // sin acceso — silencioso
       log(`⚠ Error obteniendo archivos de ${materia.nombre}: ${err.message}`)
     }
   }
+
+  const pending = [...cronogramasPending, ...otrosPending]
 
   if (!pending.length) {
     log('Todos los archivos ya fueron analizados anteriormente.')
@@ -102,19 +132,21 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
     return { totalAnalizados: 0, totalFallidos: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
   }
 
-  log(`${pending.length} archivo(s) nuevo(s) para analizar.`)
+  log(`${cronogramasPending.length} cronograma(s) + ${otrosPending.length} archivo(s) regular(es) = ${pending.length} total`)
   pct(10)
 
-  let totalAnalizados  = 0
-  let totalFallidos    = 0
-  let totalFlashcards  = 0
+  let totalAnalizados   = 0
+  let totalFallidos     = 0
+  let totalFlashcards   = 0
   let totalEvaluaciones = 0
 
   // 4. Analizar cada archivo con timeout de 30 s
   for (let i = 0; i < pending.length; i++) {
-    const { file, materia } = pending[i]
+    const { file, materia, promptType } = pending[i]
     pct(10 + Math.round((i / pending.length) * 85))
-    log(`[${i + 1}/${pending.length}] ${file.display_name}`)
+
+    const tipoLabel = promptType === 'cronograma' ? '📅' : promptType === 'notas' ? '📊' : '📄'
+    log(`[${i + 1}/${pending.length}] ${tipoLabel} ${file.display_name}`)
 
     const controller = new AbortController()
     const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS)
@@ -128,11 +160,12 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
           'x-canvas-token': canvasConfig.token,
         },
         body: JSON.stringify({
-          fileUrl:  file.url,
-          mimeType: file['content-type'],
-          fileName: file.display_name,
-          materia:  materia.nombre,
-          fileSize: file.size,
+          fileUrl:    file.url,
+          mimeType:   file['content-type'],
+          fileName:   file.display_name,
+          materia:    materia.nombre,
+          fileSize:   file.size,
+          promptType: promptType || null,
         }),
         signal: controller.signal,
       })
@@ -146,19 +179,30 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
 
       const analysis = await res.json()
 
+      // Log de caracteres extraídos
+      if (analysis._charCount) {
+        const kb = analysis._charCount < 1024
+          ? `${analysis._charCount} chars`
+          : `${(analysis._charCount / 1024).toFixed(1)} KB`
+        log(`  📝 ${kb} extraídos${analysis._truncated ? ' (truncado a 15.000)' : ''}`)
+      }
+
+      // Separar metadatos internos del análisis real
+      const { _charCount, _truncated, ...cleanAnalysis } = analysis
+
       // 5. Guardar en Supabase
       const { error: saveErr } = await supabaseClient.from('analisis_material').insert({
         user_id:             userId,
         materia_id:          materia.id,
         archivo_nombre:      file.display_name,
         archivo_canvas_id:   file.id,
-        tipo_material:       analysis.tipo_material || 'otro',
-        temas:               analysis.temas_principales    || [],
-        conceptos_clave:     analysis.conceptos_clave      || [],
-        fechas_evaluaciones: analysis.fechas_evaluaciones  || [],
-        preguntas_practica:  analysis.preguntas_practica   || [],
-        flashcards:          analysis.flashcards           || [],
-        resumen:             analysis.resumen              || '',
+        tipo_material:       cleanAnalysis.tipo_material || 'otro',
+        temas:               cleanAnalysis.temas_principales    || [],
+        conceptos_clave:     cleanAnalysis.conceptos_clave      || [],
+        fechas_evaluaciones: cleanAnalysis.fechas_evaluaciones  || [],
+        preguntas_practica:  cleanAnalysis.preguntas_practica   || [],
+        flashcards:          cleanAnalysis.flashcards           || [],
+        resumen:             cleanAnalysis.resumen              || '',
         analizado_at:        new Date().toISOString(),
       })
 
@@ -167,11 +211,11 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         totalFallidos++
       } else {
         totalAnalizados++
-        const fc = (analysis.flashcards          || []).length
-        const ev = (analysis.fechas_evaluaciones || []).length
+        const fc = (cleanAnalysis.flashcards          || []).length
+        const ev = (cleanAnalysis.fechas_evaluaciones || []).length
         totalFlashcards   += fc
         totalEvaluaciones += ev
-        log(`  ✓ ${analysis.tipo_material || 'otro'} · ${fc} flashcards · ${ev} evaluaci${ev !== 1 ? 'ones' : 'ón'}`)
+        log(`  ✓ ${cleanAnalysis.tipo_material || 'otro'} · ${fc} flashcards · ${ev} fecha${ev !== 1 ? 's' : ''}`)
       }
     } catch (err) {
       if (err.name === 'AbortError') {
