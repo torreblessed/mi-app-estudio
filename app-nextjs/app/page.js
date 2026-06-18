@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/AppShell'
 import { syncCanvasData, loadCanvasConfig } from '@/lib/canvas'
+import { analizarMateriales } from '@/lib/study-engine'
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconBook()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg> }
@@ -20,6 +21,7 @@ function IconCheck()    { return <svg width="10" height="10" viewBox="0 0 24 24"
 function IconX()        { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg> }
 function IconRefresh()  { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg> }
 function IconCanvas()   { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg> }
+function IconBrain()    { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg> }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDateLong() {
@@ -411,6 +413,81 @@ function EditTareaModal({ onClose, onSave, tarea, materiasList }) {
   )
 }
 
+// ── Analyze modal ─────────────────────────────────────────────────────────────
+function AnalyzeModal({ running, pct, log, result, onClose }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape' && !running) onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [running, onClose])
+
+  const logLines = (log || '').split('\n').filter(Boolean)
+
+  return (
+    <div className="modal-overlay" onClick={() => { if (!running) onClose() }}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h2 className="card-title">Análisis de Material IA</h2>
+            <div className="card-sub">{running ? 'Procesando archivos con Gemini…' : 'Análisis completado'}</div>
+          </div>
+          {!running && <button className="modal-close" onClick={onClose}><IconX /></button>}
+        </div>
+
+        <div style={{ paddingBottom: 4 }}>
+          {/* Barra de progreso */}
+          <div className="sync-bar-track" style={{ marginBottom: 16 }}>
+            <div className="sync-bar-fill" style={{ width: `${pct}%`, transition: 'width 0.4s ease' }} />
+          </div>
+
+          {/* Resumen al terminar */}
+          {!running && result && (
+            <div style={{
+              background: 'var(--surface-2,#f8f8f6)', borderRadius: 10,
+              padding: '16px 20px', marginBottom: 14,
+              border: '1px solid var(--border,#e8e6e1)',
+            }}>
+              {result.totalArchivos === 0 ? (
+                <div style={{ fontSize: 14, color: 'var(--ink-3)' }}>
+                  Todos los archivos ya fueron analizados anteriormente.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--ink-1)' }}>
+                    ✓ Analicé {result.totalAnalizados} de {result.totalArchivos} archivo{result.totalArchivos !== 1 ? 's' : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 20, fontSize: 13, color: 'var(--ink-3)', flexWrap: 'wrap' }}>
+                    {result.totalFlashcards > 0 && (
+                      <span>🃏 {result.totalFlashcards} flashcard{result.totalFlashcards !== 1 ? 's' : ''} generada{result.totalFlashcards !== 1 ? 's' : ''}</span>
+                    )}
+                    {result.totalEvaluaciones > 0 && (
+                      <span>📅 {result.totalEvaluaciones} evaluaci{result.totalEvaluaciones !== 1 ? 'ones' : 'ón'} detectada{result.totalEvaluaciones !== 1 ? 's' : ''}</span>
+                    )}
+                    {result.totalFlashcards === 0 && result.totalEvaluaciones === 0 && result.totalAnalizados > 0 && (
+                      <span style={{ color: 'var(--ink-4)' }}>Sin fechas ni flashcards detectadas en este material.</span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Log de progreso */}
+          {logLines.length > 0 && (
+            <div className="sync-log" style={{ maxHeight: 220, overflow: 'auto', fontSize: 11.5 }}>
+              {logLines.map((l, i) => (
+                <div key={i} style={{ color: l.startsWith('  ✓') ? 'var(--c-b)' : l.startsWith('  ✗') || l.startsWith('  ⚠') ? 'var(--c-d)' : 'inherit' }}>
+                  {l}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const router  = useRouter()
@@ -469,6 +546,13 @@ export default function HomePage() {
   const [lastSync,      setLastSync]      = useState(null)
   const [syncError,     setSyncError]     = useState('')
   const [showSyncLog,   setShowSyncLog]   = useState(false)
+
+  // Material analysis
+  const [analyzingMaterial, setAnalyzingMaterial] = useState(false)
+  const [analyzeLog,        setAnalyzeLog]        = useState('')
+  const [analyzePct,        setAnalyzePct]        = useState(0)
+  const [analyzeResult,     setAnalyzeResult]     = useState(null)
+  const [showAnalyzeModal,  setShowAnalyzeModal]  = useState(false)
 
   // ── Computed ──────────────────────────────────────────────────────────────
   const notasFiltradas = useMemo(
@@ -695,6 +779,27 @@ export default function HomePage() {
     setSyncing(false)
   }
 
+  // ── Analizar material con IA ──────────────────────────────────────────────
+  async function analizarMaterial() {
+    if (!canvasConfig) { router.push('/configuracion'); return }
+    setAnalyzingMaterial(true)
+    setAnalyzeLog('')
+    setAnalyzePct(0)
+    setAnalyzeResult(null)
+    setShowAnalyzeModal(true)
+
+    try {
+      const result = await analizarMateriales(user.id, supabase, canvasConfig, {
+        onLog:      msg => setAnalyzeLog(prev => prev ? prev + '\n' + msg : msg),
+        onProgress: n   => setAnalyzePct(n),
+      })
+      setAnalyzeResult(result)
+    } catch (err) {
+      setAnalyzeLog(prev => (prev ? prev + '\n' : '') + '✗ Error: ' + err.message)
+    }
+    setAnalyzingMaterial(false)
+  }
+
   // ── Actions ───────────────────────────────────────────────────────────────
   async function toggleTarea(id, completada) {
     setTareas(prev => prev.map(t => t.id === id ? { ...t, completada: !completada } : t))
@@ -876,10 +981,18 @@ export default function HomePage() {
                 <button
                   className="btn btn-ghost xs"
                   onClick={sincronizarCanvas}
-                  disabled={syncing}
+                  disabled={syncing || analyzingMaterial}
                   title={canvasConfig ? 'Actualizar desde Canvas' : 'Configurar Canvas'}
                 >
                   <IconRefresh /> {syncing ? 'Sincronizando…' : 'Actualizar'}
+                </button>
+                <button
+                  className="btn btn-ghost xs"
+                  onClick={analizarMaterial}
+                  disabled={syncing || analyzingMaterial}
+                  title="Analizar archivos de Canvas con IA para generar flashcards y detectar evaluaciones"
+                >
+                  <IconBrain /> {analyzingMaterial ? 'Analizando…' : 'Analizar IA'}
                 </button>
               </div>
 
@@ -1106,6 +1219,17 @@ export default function HomePage() {
           onClose={() => setEditTareaData(null)}
           onSave={updates => actualizarTarea(editTareaData.id, updates)}
           materiasList={materiasList} />
+      )}
+
+      {/* Analyze modal */}
+      {showAnalyzeModal && (
+        <AnalyzeModal
+          running={analyzingMaterial}
+          pct={analyzePct}
+          log={analyzeLog}
+          result={analyzeResult}
+          onClose={() => setShowAnalyzeModal(false)}
+        />
       )}
     </AppShell>
   )
