@@ -25,6 +25,7 @@ export function canAnalyzeFile(mimeType, fileName) {
   if (m.includes('wordprocessingml')  || n.endsWith('.docx')) return true
   if (m.includes('presentationml')    || n.endsWith('.pptx')) return true
   if (m.includes('spreadsheetml')     || n.endsWith('.xlsx')) return true
+  if (m.includes('ms-excel')          || n.endsWith('.xls'))  return true
   if (n.endsWith('.txt') || n.endsWith('.md') || n.endsWith('.rtf')) return true
   return false
 }
@@ -81,15 +82,23 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
     return { totalAnalizados: 0, totalFallidos: 0, totalFlashcards: 0, totalEvaluaciones: 0, totalArchivos: 0 }
   }
 
-  // 2. Análisis ya existentes
+  // 2. Cargar RUT del usuario para detección de calificaciones personales
+  let userRut = null
+  try {
+    const { data: cfg } = await supabaseClient
+      .from('configuracion_usuario').select('rut').eq('user_id', userId).maybeSingle()
+    userRut = cfg?.rut || null
+    if (userRut) log(`RUT configurado: ${userRut} (se buscará en archivos de calificaciones)`)
+  } catch {}
+
+  // 3. Análisis ya existentes
   const { data: yaAnalizados } = await supabaseClient
     .from('analisis_material').select('id, archivo_canvas_id, materia_id, flashcards, temas, resumen')
     .eq('user_id', userId)
 
-  const analizadosSet   = new Set((yaAnalizados || []).filter(a => !isFailedAnalysis(a)).map(a => Number(a.archivo_canvas_id)))
+  const analizadosSet     = new Set((yaAnalizados || []).filter(a => !isFailedAnalysis(a)).map(a => Number(a.archivo_canvas_id)))
   const failedAnalysisIds = new Set((yaAnalizados || []).filter(isFailedAnalysis).map(a => a.id))
 
-  // Borrar análisis fallidos para re-analizar
   if (failedAnalysisIds.size > 0) {
     log(`♻ Eliminando ${failedAnalysisIds.size} análisis incompletos para re-analizar…`)
     for (const id of failedAnalysisIds) {
@@ -103,7 +112,7 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
   const cronogramasPending = []
   const otrosPending       = []
 
-  // 3. Recolectar archivos y páginas por materia
+  // 4. Recolectar archivos y páginas por materia
   for (const materia of materias) {
     try {
       // ── Archivos ──────────────────────────────────────────────────────────
@@ -118,21 +127,25 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
 
         cronos.forEach(f => cronogramasPending.push({ file: f, materia, promptType: 'cronograma', source: 'file' }))
         otros.sort((a, b) => filePriority(a.display_name) - filePriority(b.display_name))
-        otros.slice(0, MAX_FILES_PER_MATERIA).forEach(f => {
+        // Include ALL files (grade files prioritized by moving them first)
+        const gradeFiles = otros.filter(f => isGradeFile(f.display_name))
+        const nonGrades  = otros.filter(f => !isGradeFile(f.display_name))
+        const orderedOtros = [...gradeFiles, ...nonGrades].slice(0, MAX_FILES_PER_MATERIA)
+        orderedOtros.forEach(f => {
           otrosPending.push({ file: f, materia, promptType: isGradeFile(f.display_name) ? 'notas' : null, source: 'file' })
         })
         if (otros.length > MAX_FILES_PER_MATERIA) {
           log(`  ${materia.nombre}: ${MAX_FILES_PER_MATERIA}/${otros.length} archivos regulares seleccionados`)
         }
         if (cronos.length) log(`  ${materia.nombre}: ${cronos.length} cronograma(s) en archivos`)
+        if (gradeFiles.length) log(`  ${materia.nombre}: ${gradeFiles.length} archivo(s) de calificaciones`)
       }
 
-      // ── Páginas del curso (buscar cronogramas y material relevante) ──────
+      // ── Páginas del curso ─────────────────────────────────────────────────
       try {
         const pages = await getCoursePages(canvasConfig.url, canvasConfig.token, materia.canvas_id)
         if (Array.isArray(pages) && pages.length > 0) {
-          // Usar file.id = -1 * index para evitar colisiones con archivos reales
-          const cronPages = pages.filter(p => isCronograma(p.title || p.url))
+          const cronPages  = pages.filter(p => isCronograma(p.title || p.url))
           const otherPages = pages.filter(p => !isCronograma(p.title || p.url)).slice(0, 3)
           const relevantPages = [...cronPages, ...otherPages]
 
@@ -144,7 +157,7 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
             const pageItem = {
               id:             fakeId,
               display_name:   page.title || page.url,
-              url:            null, // se carga al analizar
+              url:            null,
               'content-type': 'text/html',
               size:           0,
               _pageUrl:       page.url,
@@ -160,7 +173,7 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         }
       } catch {}
 
-      // ── Módulos: buscar items tipo File aún no indexados ─────────────────
+      // ── Módulos: items tipo File ───────────────────────────────────────────
       try {
         const mods = await getCourseModules(canvasConfig.url, canvasConfig.token, materia.canvas_id)
         if (Array.isArray(mods)) {
@@ -170,22 +183,20 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
               if (item.type === 'File' && item.content_id) {
                 const fakeId = item.content_id
                 if (!analizadosSet.has(fakeId) && item.url) {
-                  // Solo agregar si no está ya en la lista de archivos
-                  const alreadyIn = [...cronogramasPending, ...otrosPending]
-                    .some(p => p.file.id === fakeId)
+                  const alreadyIn = [...cronogramasPending, ...otrosPending].some(p => p.file.id === fakeId)
                   if (!alreadyIn) {
                     const fileItem = {
                       id:             fakeId,
                       display_name:   item.title || `Módulo: ${mod.name}`,
                       url:            item.url,
-                      'content-type': 'application/pdf', // asumir PDF para items de módulo
+                      'content-type': 'application/pdf',
                       size:           0,
                     }
                     if (canAnalyzeFile(fileItem['content-type'], fileItem.display_name)) {
                       if (isCronograma(fileItem.display_name)) {
                         cronogramasPending.push({ file: fileItem, materia, promptType: 'cronograma', source: 'module' })
                       } else if (otrosPending.filter(p => p.materia.id === materia.id).length < MAX_FILES_PER_MATERIA) {
-                        otrosPending.push({ file: fileItem, materia, promptType: null, source: 'module' })
+                        otrosPending.push({ file: fileItem, materia, promptType: isGradeFile(fileItem.display_name) ? 'notas' : null, source: 'module' })
                       }
                     }
                   }
@@ -215,24 +226,31 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
 
   let totalAnalizados = 0, totalFallidos = 0, totalFlashcards = 0, totalEvaluaciones = 0
 
-  // 4. Analizar cada item
+  // Per-materia tracking
+  const materiaStats = {}
+  for (const m of materias) {
+    materiaStats[m.id] = { nombre: m.nombre, procesados: 0, conTexto: 0, calificaciones: 0, califUsuario: 0 }
+  }
+
+  // 5. Analizar cada item
   for (let i = 0; i < pending.length; i++) {
     const { file, materia, promptType, source } = pending[i]
     pct(10 + Math.round((i / pending.length) * 85))
 
-    const icon = promptType === 'cronograma' ? '📅' : promptType === 'notas' ? '📊' : '📄'
+    const icon   = promptType === 'cronograma' ? '📅' : promptType === 'notas' ? '📊' : '📄'
     const srcTag = source !== 'file' ? ` [${source}]` : ''
     log(`[${i + 1}/${pending.length}] ${icon} ${file.display_name}${srcTag}`)
 
     const controller = new AbortController()
     const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const mStat      = materiaStats[materia.id]
 
     try {
       let fileUrl  = file.url
       let mimeType = file['content-type']
       let fileText = null
 
-      // Si es una página de Canvas, obtener el HTML directamente
+      // Canvas page: fetch HTML content
       if (source === 'page' && file._pageUrl) {
         try {
           const pageData = await getCoursePage(canvasConfig.url, canvasConfig.token, file._courseId, file._pageUrl)
@@ -248,33 +266,31 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         }
       }
 
+      const headers = {
+        'Content-Type':   'application/json',
+        'x-canvas-url':   canvasConfig.url,
+        'x-canvas-token': canvasConfig.token,
+      }
+
       let res
       if (fileText) {
-        // Enviar como texto directo
         res = await fetch('/api/analizar-material', {
           method: 'POST',
-          headers: {
-            'Content-Type':   'application/json',
-            'x-canvas-url':   canvasConfig.url,
-            'x-canvas-token': canvasConfig.token,
-          },
+          headers,
           body: JSON.stringify({
             fileText,
             mimeType: 'text/plain',
-            fileName: file.display_name,
-            materia:  materia.nombre,
+            fileName:   file.display_name,
+            materia:    materia.nombre,
             promptType: promptType || null,
+            userRut,
           }),
           signal: controller.signal,
         })
       } else {
         res = await fetch('/api/analizar-material', {
           method: 'POST',
-          headers: {
-            'Content-Type':   'application/json',
-            'x-canvas-url':   canvasConfig.url,
-            'x-canvas-token': canvasConfig.token,
-          },
+          headers,
           body: JSON.stringify({
             fileUrl,
             mimeType,
@@ -282,6 +298,7 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
             materia:    materia.nombre,
             fileSize:   file.size,
             promptType: promptType || null,
+            userRut,
           }),
           signal: controller.signal,
         })
@@ -291,19 +308,29 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         const err = await res.json().catch(() => ({}))
         log(`  ⚠ Saltado: ${err.error || `HTTP ${res.status}`}`)
         totalFallidos++
+        mStat.procesados++
         continue
       }
 
       const analysis = await res.json()
+      mStat.procesados++
 
+      // Log extraction details
       if (analysis._charCount) {
-        const kb = analysis._charCount < 1024
-          ? `${analysis._charCount} chars`
-          : `${(analysis._charCount / 1024).toFixed(1)} KB`
-        log(`  📝 ${kb}${analysis._truncated ? ' (truncado)' : ''}`)
+        const chars = analysis._charCount
+        const kb    = chars < 1024 ? `${chars} chars` : `${(chars / 1024).toFixed(1)} KB`
+        const method = analysis._extractMethod ? ` [${analysis._extractMethod}]` : ''
+        const gradeFlag = analysis._isGrades ? ' 📊GRADES' : ''
+        const rutFlag   = analysis._hasUserGrade ? ' ✓RUT' : ''
+        log(`  📝 ${kb}${method}${gradeFlag}${rutFlag}${analysis._truncated ? ' (truncado)' : ''}`)
+        if (analysis._extractMethod && analysis._extractMethod !== 'inlineData' && analysis._extractMethod !== 'page-html') {
+          mStat.conTexto++
+        }
       }
+      if (analysis._isGrades) mStat.calificaciones++
+      if (analysis._hasUserGrade) mStat.califUsuario++
 
-      const { _charCount, _truncated, ...cleanAnalysis } = analysis
+      const { _charCount, _truncated, _extractMethod, _isGrades, _hasUserGrade, ...cleanAnalysis } = analysis
 
       const { error: saveErr } = await supabaseClient.from('analisis_material').insert({
         user_id:             userId,
@@ -342,15 +369,37 @@ export async function analizarMateriales(userId, supabaseClient, canvasConfig, c
         log(`  ✗ ${err.message}`)
       }
       totalFallidos++
+      materiaStats[materia.id].procesados++
     } finally {
       clearTimeout(timeoutId)
     }
   }
 
   pct(100)
+
+  // ── Resumen global ────────────────────────────────────────────────────────
   log(`\n── Resumen ──────────────────────────────────────`)
   log(`📁 Analizados: ${totalAnalizados}/${pending.length}${totalFallidos ? ` · Fallidos: ${totalFallidos}` : ''}`)
   log(`🃏 Flashcards: ${totalFlashcards} · 📅 Fechas evaluación: ${totalEvaluaciones}`)
+
+  // ── Resumen por materia ───────────────────────────────────────────────────
+  const materiaGroups = {}
+  pending.forEach(({ materia }) => {
+    if (!materiaGroups[materia.id]) materiaGroups[materia.id] = { nombre: materia.nombre, count: 0 }
+    materiaGroups[materia.id].count++
+  })
+
+  log(`\n── Por materia ──────────────────────────────────`)
+  for (const [mid, stat] of Object.entries(materiaStats)) {
+    const group = materiaGroups[mid]
+    if (!group || group.count === 0) continue
+    log(
+      `[${stat.nombre}] Archivos: ${stat.procesados} procesados` +
+      `, ${stat.conTexto} con texto extraído` +
+      `, ${stat.calificaciones} identificados como calificaciones` +
+      `, ${stat.califUsuario} con calificaciones del usuario`
+    )
+  }
 
   return { totalAnalizados, totalFallidos, totalFlashcards, totalEvaluaciones, totalArchivos: pending.length }
 }

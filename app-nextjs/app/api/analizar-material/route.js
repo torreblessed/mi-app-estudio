@@ -1,5 +1,7 @@
 export const maxDuration = 60
 
+import { extractText, detectGradeContent, findRutInText, truncateExtracted } from '@/lib/pdf-extractor'
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function normalizeMime(raw) {
@@ -9,6 +11,7 @@ function normalizeMime(raw) {
   if (m.includes('wordprocessingml.document')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   if (m.includes('presentationml.presentation')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
   if (m.includes('spreadsheetml.sheet'))       return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  if (m.includes('ms-excel') || m.includes('vnd.ms-excel')) return 'application/vnd.ms-excel'
   if (m.includes('rtf'))                       return 'application/rtf'
   return null
 }
@@ -17,6 +20,12 @@ function isTextMime(mime, fileName) {
   const m = (mime || '').toLowerCase()
   const n = (fileName || '').toLowerCase()
   return m.startsWith('text/') || n.endsWith('.txt') || n.endsWith('.md') || n.endsWith('.rtf')
+}
+
+function isPresentationMime(mime, fileName) {
+  const m = (mime || '').toLowerCase()
+  const n = (fileName || '').toLowerCase()
+  return m.includes('presentationml') || n.endsWith('.pptx') || n.endsWith('.ppt')
 }
 
 function extractJson(text) {
@@ -87,6 +96,13 @@ Si encuentras el promedio del curso, agrégalo en "conceptos_clave" como {"conce
 
 Devuelve ÚNICAMENTE el JSON especificado.`
 
+function buildNotasPromptWithRut(userRut) {
+  if (!userRut) return PROMPT_NOTAS
+  return `${PROMPT_NOTAS}
+
+IMPORTANTE: El RUT del estudiante es "${userRut}". Si encuentras este RUT en el documento, extrae TODAS las calificaciones asociadas a esa fila/persona específicamente, e inclúyelas en "conceptos_clave" como: {"concepto": "Mi nota — <nombre evaluación>", "explicacion_breve": "<nota> / <nota_maxima>"}.`
+}
+
 const MAX_TEXT_CHARS = 15_000
 const MIN_TEXT_CHARS = 100
 
@@ -125,7 +141,7 @@ async function callGemini(apiKey, parts, systemPrompt) {
 
 export async function POST(request) {
   try {
-    const { fileUrl, fileText, mimeType, fileName, materia, fileSize, promptType } = await request.json()
+    const { fileUrl, fileText, mimeType, fileName, materia, fileSize, promptType, userRut } = await request.json()
     const canvasToken = request.headers.get('x-canvas-token')
     const apiKey      = process.env.GEMINI_API_KEY
 
@@ -138,15 +154,15 @@ export async function POST(request) {
       return Response.json({ error: `Archivo demasiado grande (${Math.round(fileSize / 1024 / 1024)} MB > 10 MB).` }, { status: 422 })
     }
 
-    // Si se pasa texto directamente (páginas Canvas), usarlo sin descargar
+    // ── Path 1: fileText directo (páginas Canvas HTML) ─────────────────────
     if (fileText) {
-      const text = String(fileText).slice(0, 15_000)
-      const filePrompt = promptType === 'cronograma' ? PROMPT_CRONOGRAMA
-                       : promptType === 'notas'      ? PROMPT_NOTAS
+      const text = String(fileText).slice(0, MAX_TEXT_CHARS)
+      const resolvedPromptType = promptType || (detectGradeContent(text) ? 'notas' : null)
+      const filePrompt = resolvedPromptType === 'cronograma' ? PROMPT_CRONOGRAMA
+                       : resolvedPromptType === 'notas'      ? buildNotasPromptWithRut(userRut)
                        : PROMPT_STANDARD
-      const parts = [{
-        text: `Nombre: "${fileName}"\nMateria: "${materia}"\n\nContenido:\n${text}\n\n${filePrompt}`,
-      }]
+      const parts = [{ text: `Nombre: "${fileName}"\nMateria: "${materia}"\n\nContenido:\n${text}\n\n${filePrompt}` }]
+
       let analysis = null, lastErr = null
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -159,15 +175,16 @@ export async function POST(request) {
         }
       }
       if (!analysis) return Response.json({ error: lastErr?.message || 'Sin respuesta' }, { status: 422 })
-      return Response.json({ ...analysis, _charCount: text.length, _truncated: fileText.length > 15_000 })
+      return Response.json({
+        ...analysis,
+        _charCount:   text.length,
+        _truncated:   fileText.length > MAX_TEXT_CHARS,
+        _extractMethod: 'page-html',
+        _isGrades:    resolvedPromptType === 'notas',
+      })
     }
 
-    const mime = normalizeMime(mimeType)
-    if (!mime) {
-      return Response.json({ error: `Tipo de archivo no soportado: ${mimeType}` }, { status: 422 })
-    }
-
-    // Descargar archivo desde Canvas
+    // ── Download from Canvas ───────────────────────────────────────────────
     const fileRes = await fetch(fileUrl, {
       headers: { 'Authorization': `Bearer ${canvasToken}` },
       redirect: 'follow',
@@ -176,81 +193,139 @@ export async function POST(request) {
       return Response.json({ error: `No se pudo descargar el archivo (HTTP ${fileRes.status}).` }, { status: 422 })
     }
 
-    const buffer = await fileRes.arrayBuffer()
+    const buffer = Buffer.from(await fileRes.arrayBuffer())
     if (buffer.byteLength > MAX_BYTES) {
       return Response.json({ error: `Archivo demasiado grande (${Math.round(buffer.byteLength / 1024 / 1024)} MB > 10 MB).` }, { status: 422 })
     }
 
-    // Seleccionar prompt según tipo
-    const filePrompt = promptType === 'cronograma' ? PROMPT_CRONOGRAMA
-                     : promptType === 'notas'      ? PROMPT_NOTAS
-                     : PROMPT_STANDARD
-
-    // Preparar partes para Gemini según tipo de archivo
-    let parts
-    let charCount
-    let truncated = false
-
-    if (isTextMime(mime, fileName)) {
-      // Archivo de texto: extraer texto directamente
-      const text = Buffer.from(buffer).toString('utf-8').replace(/\r\n/g, '\n')
-      charCount = text.length
-
-      if (charCount < MIN_TEXT_CHARS) {
-        return Response.json(
-          { error: `Contenido insuficiente (${charCount} caracteres — posible archivo vacío o protegido).` },
-          { status: 422 }
-        )
-      }
-
-      const finalText = charCount > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text
-      truncated = charCount > MAX_TEXT_CHARS
-
-      const prefix = truncated
-        ? `[EXTRACTO: primeros ${MAX_TEXT_CHARS.toLocaleString()} de ${charCount.toLocaleString()} caracteres totales]\n\n`
-        : ''
-
-      parts = [{
-        text: `Nombre del archivo: "${fileName}"\nMateria: "${materia}"\n\nContenido:\n${prefix}${finalText}\n\n${filePrompt}`,
-      }]
-    } else {
-      // Archivo binario (PDF, DOCX, PPTX, XLSX): enviar como inlineData
-      charCount = buffer.byteLength
-      const base64 = Buffer.from(buffer).toString('base64')
-      parts = [
-        { inlineData: { mimeType: mime, data: base64 } },
-        { text: `Nombre del archivo: "${fileName}"\nMateria: "${materia}"\n\n${filePrompt}` },
-      ]
+    const mime = normalizeMime(mimeType)
+    if (!mime) {
+      return Response.json({ error: `Tipo de archivo no soportado: ${mimeType}` }, { status: 422 })
     }
 
-    // Llamar a Gemini con hasta 2 intentos (cubre errores de red y JSON inválido)
-    let analysis = null
-    let lastErr  = null
+    // ── Path 2: extract text locally (PDF / DOCX / XLSX / text) ───────────
+    const extracted = await extractText(buffer, mime, fileName)
+    const extractedOk = extracted?.text && extracted.text.length >= MIN_TEXT_CHARS
+
+    if (extractedOk) {
+      const rawText      = extracted.text
+      // Detect grade content from actual text, regardless of filename
+      const isGradeByContent  = detectGradeContent(rawText)
+      const isGradeByFilename = promptType === 'notas'
+      const isGrades          = isGradeByContent || isGradeByFilename
+      const hasUserGrade      = isGrades && findRutInText(rawText, userRut)
+
+      const resolvedPromptType = promptType === 'cronograma' ? 'cronograma'
+                               : isGrades                    ? 'notas'
+                               : null
+
+      const filePrompt = resolvedPromptType === 'cronograma' ? PROMPT_CRONOGRAMA
+                       : resolvedPromptType === 'notas'      ? buildNotasPromptWithRut(hasUserGrade ? userRut : null)
+                       : PROMPT_STANDARD
+
+      const { finalText, truncated } = truncateExtracted(rawText)
+
+      const parts = [{
+        text: `Nombre del archivo: "${fileName}"\nMateria: "${materia}"\nMétodo extracción: ${extracted.method}${extracted.pages ? `, ${extracted.pages} páginas` : ''}\n\nContenido:\n${finalText}\n\n${filePrompt}`,
+      }]
+
+      console.log(
+        `[analizar-material] ${fileName} | ${extracted.method} | ${extracted.charCount} chars` +
+        `${isGrades ? ' | GRADES' : ''}${hasUserGrade ? ' | RUT_FOUND' : ''}${truncated ? ' | truncated' : ''}`
+      )
+
+      let analysis = null, lastErr = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rawResp = await callGemini(apiKey, parts, SYSTEM_PROMPT)
+          analysis = extractJson(rawResp)
+          if (analysis) break
+        } catch (err) {
+          lastErr = err
+          if (attempt === 0) await new Promise(r => setTimeout(r, 2000))
+        }
+      }
+      if (!analysis) return Response.json({ error: lastErr?.message || 'Gemini no respondió.' }, { status: 422 })
+
+      return Response.json({
+        ...analysis,
+        _charCount:     extracted.charCount,
+        _truncated:     truncated,
+        _extractMethod: extracted.method,
+        _isGrades:      isGrades,
+        _hasUserGrade:  hasUserGrade,
+      })
+    }
+
+    // ── Path 3: fallback to Gemini inlineData (PPTX, images, image-based PDFs)
+    if (extracted && !extractedOk) {
+      console.log(`[analizar-material] ${fileName} | ${extracted.method} | ${extracted.reason || 'empty'} | falling back to inlineData`)
+    } else {
+      console.log(`[analizar-material] ${fileName} | no extractor for ${mime} | using inlineData`)
+    }
+
+    if (!isPresentationMime(mime, fileName) && isTextMime(mime, fileName)) {
+      // Shouldn't reach here normally, but handle text fallback
+      const text  = buffer.toString('utf-8').replace(/\r\n/g, '\n')
+      if (text.length < MIN_TEXT_CHARS) {
+        return Response.json({ error: `Contenido insuficiente (${text.length} caracteres).` }, { status: 422 })
+      }
+      const slice = text.slice(0, MAX_TEXT_CHARS)
+      const filePrompt = promptType === 'cronograma' ? PROMPT_CRONOGRAMA
+                       : promptType === 'notas'      ? buildNotasPromptWithRut(userRut)
+                       : PROMPT_STANDARD
+      const parts = [{ text: `Nombre: "${fileName}"\nMateria: "${materia}"\n\nContenido:\n${slice}\n\n${filePrompt}` }]
+      let analysis = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try { const r = await callGemini(apiKey, parts, SYSTEM_PROMPT); analysis = extractJson(r); if (analysis) break } catch {}
+        if (attempt === 0) await new Promise(r => setTimeout(r, 2000))
+      }
+      if (!analysis) return Response.json({ error: 'Gemini no devolvió JSON válido.' }, { status: 422 })
+      return Response.json({ ...analysis, _charCount: text.length, _truncated: text.length > MAX_TEXT_CHARS, _extractMethod: 'text-fallback' })
+    }
+
+    // Binary file (PPTX, image-PDF): send as inlineData to Gemini
+    const filePrompt = promptType === 'cronograma' ? PROMPT_CRONOGRAMA
+                     : promptType === 'notas'      ? buildNotasPromptWithRut(userRut)
+                     : PROMPT_STANDARD
+    const base64 = buffer.toString('base64')
+    const parts  = [
+      { inlineData: { mimeType: mime, data: base64 } },
+      { text: `Nombre del archivo: "${fileName}"\nMateria: "${materia}"\n\n${filePrompt}` },
+    ]
+
+    let analysis = null, lastErr = null
     for (let attempt = 0; attempt < 2; attempt++) {
       let rawText = ''
       try {
         rawText = await callGemini(apiKey, parts, SYSTEM_PROMPT)
       } catch (err) {
         lastErr = err
-        console.warn(`[analizar-material] Intento ${attempt + 1} falló:`, err.message)
+        console.warn(`[analizar-material] inlineData intento ${attempt + 1} falló:`, err.message)
         if (attempt === 0) await new Promise(r => setTimeout(r, 2000))
         continue
       }
       analysis = extractJson(rawText)
       if (analysis) break
       lastErr = new Error('JSON inválido')
-      console.warn(`[analizar-material] Intento ${attempt + 1}: JSON inválido. Preview:`, rawText.slice(0, 300))
       if (attempt === 0) await new Promise(r => setTimeout(r, 2000))
     }
 
     if (!analysis) {
-      const msg = lastErr?.message === 'JSON inválido'
-        ? 'Gemini no devolvió JSON válido.'
-        : (lastErr?.message || 'Gemini no respondió.')
-      return Response.json({ error: msg }, { status: 422 })
+      return Response.json({
+        error: lastErr?.message === 'JSON inválido'
+          ? 'Gemini no devolvió JSON válido.'
+          : (lastErr?.message || 'Gemini no respondió.'),
+      }, { status: 422 })
     }
 
-    return Response.json({ ...analysis, _charCount: charCount, _truncated: truncated })
+    return Response.json({
+      ...analysis,
+      _charCount:     buffer.byteLength,
+      _truncated:     false,
+      _extractMethod: 'inlineData',
+    })
+
   } catch (err) {
     console.error('[analizar-material]', err)
     return Response.json({ error: err.message || 'Error interno.' }, { status: 500 })
