@@ -92,10 +92,20 @@ function EmptyState({ title, sub }) {
 }
 
 // ── Subject card ──────────────────────────────────────────────────────────────
+function statusInfo(materia) {
+  const ne = materia.nextEval
+  if (!materia.hasCanvas) return { label: 'Sin Canvas', cls: 'dim' }
+  if (ne && ne.daysAway <= 3) return { label: 'Evaluación próxima', cls: 'hot' }
+  if (ne && ne.daysAway <= 7) return { label: 'Esta semana', cls: 'warn' }
+  if (materia.promedio != null) return { label: 'Al día', cls: 'ok' }
+  return { label: 'Sin calificaciones', cls: 'dim' }
+}
+
 function SubjectCard({ materia, onClick }) {
   const color  = materia.color || materiaColor(materia.nombre)
   const ne     = materia.nextEval
   const urgent = ne && ne.daysAway <= 3
+  const status = statusInfo(materia)
   return (
     <button className="subj-card" onClick={onClick}>
       <div className="subj-card-head">
@@ -103,22 +113,29 @@ function SubjectCard({ materia, onClick }) {
           <span className={`dot dot-${color}`} />
           <span>{materia.codigo || materia.nombre}</span>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          {materia.promedio != null && (
-            <span className="foot-stat" style={{
-              fontSize:11,
-              fontWeight:600,
-              color: materia.promedio >= 5.0 ? 'var(--c-b,#22c55e)' : materia.promedio >= 4.0 ? '#ca8a04' : 'var(--c-d,#ef4444)',
-            }}>
-              {materia.promedio.toFixed(1)} ({materia.califCount} eval.)
-            </span>
-          )}
-          <span className="foot-stat" style={{ fontSize: 11 }}>
-            {materia.notasCount} apunte{materia.notasCount !== 1 ? 's' : ''}
-          </span>
-        </div>
+        <span className={`status-pill ${status.cls}`}>{status.label}</span>
       </div>
       <div className="subj-name">{materia.nombre}</div>
+      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        {materia.promedio != null && (
+          <span className="foot-stat" style={{
+            fontSize:12, fontWeight:700,
+            color: materia.promedio >= 5.0 ? 'var(--c-b-ink,#166534)' : materia.promedio >= 4.0 ? '#92400e' : '#991b1b',
+          }}>
+            {materia.promedio.toFixed(1)} <span style={{ fontWeight:400, fontSize:11 }}>({materia.califCount} eval.)</span>
+          </span>
+        )}
+        {materia.materialCount > 0 && (
+          <span className="foot-stat" style={{ fontSize:11 }}>
+            📄 {materia.materialCount} material{materia.materialCount !== 1 ? 'es' : ''}
+          </span>
+        )}
+        {materia.notasCount > 0 && (
+          <span className="foot-stat" style={{ fontSize:11 }}>
+            {materia.notasCount} apunte{materia.notasCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
       {ne ? (
         <div className="subj-next">
           <div className="next-eyebrow">Próxima · {TIPO_LABEL[ne.tipo] || ne.tipo}</div>
@@ -556,6 +573,9 @@ export default function HomePage() {
   const [syncError,     setSyncError]     = useState('')
   const [showSyncLog,   setShowSyncLog]   = useState(false)
 
+  // Analisis material counts per materia
+  const [analisisCounts, setAnalisisCounts] = useState({})
+
   // Material analysis
   const [analyzingMaterial, setAnalyzingMaterial] = useState(false)
   const [analyzeLog,        setAnalyzeLog]        = useState('')
@@ -601,17 +621,19 @@ export default function HomePage() {
     })
 
     return materiasTable.map(m => ({
-      nombre:    m.nombre,
-      codigo:    m.codigo,
-      color:     m.color || materiaColor(m.nombre),
-      notasCount: notasCounts[m.nombre] || 0,
-      nextEval:  nextEvalByMateria[m.nombre] || null,
-      califCount: califSums[m.nombre]?.n || 0,
-      promedio:  califSums[m.nombre]
+      nombre:       m.nombre,
+      codigo:       m.codigo,
+      color:        m.color || materiaColor(m.nombre),
+      notasCount:   notasCounts[m.nombre] || 0,
+      nextEval:     nextEvalByMateria[m.nombre] || null,
+      califCount:   califSums[m.nombre]?.n || 0,
+      promedio:     califSums[m.nombre]
         ? Math.round(califSums[m.nombre].s / califSums[m.nombre].n * 10) / 10
         : null,
+      hasCanvas:    m.canvas_id != null,
+      materialCount: analisisCounts[m.id] || 0,
     })).sort((a, b) => a.nombre.localeCompare(b.nombre))
-  }, [allNotas, upcomingEvals, materiasTable, calificaciones])
+  }, [allNotas, upcomingEvals, materiasTable, calificaciones, analisisCounts])
 
   // materiasList para los modales: materias de la tabla + nombres de notas existentes
   const materiasList = useMemo(() => {
@@ -745,6 +767,20 @@ export default function HomePage() {
 
   useEffect(() => { if (ready) cargarCalificaciones() }, [ready, cargarCalificaciones])
 
+  // ── Analisis material counts ──────────────────────────────────────────────
+  const cargarAnalisisCounts = useCallback(async () => {
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (!u) return
+    const { data } = await supabase.from('analisis_material').select('materia_id').eq('user_id', u.id)
+    if (data) {
+      const counts = {}
+      data.forEach(a => { if (a.materia_id) counts[a.materia_id] = (counts[a.materia_id] || 0) + 1 })
+      setAnalisisCounts(counts)
+    }
+  }, [])
+
+  useEffect(() => { if (ready) cargarAnalisisCounts() }, [ready, cargarAnalisisCounts])
+
   // ── Canvas config ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready || !user) return
@@ -775,7 +811,7 @@ export default function HomePage() {
       )
       setLastSync(result.now)
       // Recargar todo
-      await Promise.all([cargarMaterias(), cargarCalificaciones(), cargarTareas(), cargarCalendario(), cargarEvals()])
+      await Promise.all([cargarMaterias(), cargarCalificaciones(), cargarTareas(), cargarCalendario(), cargarEvals(), cargarAnalisisCounts()])
       setDismissedAlert(false)
     } catch (err) {
       const msg = err.message.includes('401') || err.message.includes('403')

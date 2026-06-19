@@ -920,7 +920,11 @@ export default function MateriaPage() {
               </div>
               {loadNotas ? <SkeletonNotes /> : notas.length === 0 ? (
                 <EmptyState title="Sin apuntes aún"
-                  sub="Anota fórmulas, dudas o resúmenes que necesites recordar de esta materia." />
+                  sub="Anota fórmulas, dudas o resúmenes que necesites recordar de esta materia.">
+                  <button className="btn btn-primary sm" style={{ marginTop:16 }} onClick={() => setNoteModal(true)}>
+                    <IconPlus /> Crear primer apunte
+                  </button>
+                </EmptyState>
               ) : (
                 <div className="notes-grid">
                   {notas.map(n => (
@@ -955,7 +959,11 @@ export default function MateriaPage() {
               </div>
               {loadTareas ? <SkeletonTasks /> : tareas.length === 0 ? (
                 <EmptyState title="Sin tareas aún"
-                  sub="Agrega pruebas, entregas, lecturas o tareas para esta materia." />
+                  sub="Agrega pruebas, entregas, lecturas o tareas para planificar tu semana.">
+                  <button className="btn btn-primary sm" style={{ marginTop:16 }} onClick={() => setTareaModal(true)}>
+                    <IconPlus /> Agregar primera tarea
+                  </button>
+                </EmptyState>
               ) : (
                 <>
                   {tareasVig.length > 0 && (
@@ -1188,8 +1196,20 @@ export default function MateriaPage() {
                       <tbody>
                         {mergedRows.length === 0 && pondRows.length === 0 && (
                           <tr>
-                            <td colSpan={6} style={{ ...tdS, textAlign:'center', color:'var(--ink-4)', padding:'28px 10px' }}>
-                              Sincroniza desde Canvas o agrega ponderaciones manualmente.
+                            <td colSpan={6} style={{ padding:'36px 10px' }}>
+                              <div style={{ textAlign:'center', color:'var(--ink-4)', fontSize:13 }}>
+                                <div style={{ fontSize:28, marginBottom:10 }}>📊</div>
+                                <div style={{ fontWeight:500, color:'var(--ink-2)', marginBottom:6 }}>Sin calificaciones aún</div>
+                                <div style={{ marginBottom:14, fontSize:12 }}>
+                                  Sincroniza Canvas desde el panel principal para importar notas, o agrega ponderaciones manualmente con "Agregar".
+                                </div>
+                                <button className="btn btn-ghost xs" onClick={() => setPondRows(p => [...p, {
+                                  _local: true, _tmpId: `tmp-${Date.now()}`,
+                                  nombre_evaluacion: 'Evaluación 1', porcentaje: 30, tipo: 'otro', orden: 0,
+                                }])}>
+                                  <IconPlus /> Agregar primera ponderación
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -1393,9 +1413,14 @@ export default function MateriaPage() {
                       Archivos · {archivos.length}
                     </div>
 
-                    {archivos.length === 0 && (
-                      <EmptyState title="Sin archivos publicados"
-                        sub="El profesor aún no ha subido archivos a este curso en Canvas." />
+                    {archivos.length === 0 && modulos.length === 0 && (
+                      <EmptyState title="Sin material publicado"
+                        sub="El profesor aún no ha subido archivos ni módulos a este curso en Canvas. Si sabes que hay material, prueba re-sincronizando desde el panel principal." />
+                    )}
+                    {archivos.length === 0 && modulos.length > 0 && (
+                      <div style={{ fontSize:13, color:'var(--ink-4)', padding:'12px 0' }}>
+                        El material está organizado en módulos. Expande cada sección para verlo.
+                      </div>
                     )}
 
                     {/* Syllabus files first */}

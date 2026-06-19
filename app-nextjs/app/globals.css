@@ -380,6 +380,12 @@ h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 500; letter-spacin
 .subj-foot { display: flex; gap: 18px; }
 .foot-stat { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); }
 
+.status-pill { display:inline-flex; align-items:center; font-family:var(--font-mono); font-size:10px; font-weight:600; letter-spacing:0.04em; padding:2px 7px; border-radius:4px; flex-shrink:0; }
+.status-pill.ok  { background:var(--c-b-bg); color:var(--c-b-ink); }
+.status-pill.warn{ background:#fef9c3; color:#854d0e; }
+.status-pill.hot { background:#fee2e2; color:#991b1b; }
+.status-pill.dim { background:var(--surface-3); color:var(--ink-4); }
+
 /* Notes */
 .notes-tab { display: flex; flex-direction: column; gap: 18px; }
 .notes-head { display: flex; align-items: center; justify-content: space-between; }
@@ -625,6 +631,7 @@ h1, h2, h3, h4 { font-family: var(--font-serif); font-weight: 500; letter-spacin
 .tab-active .tab-count { color: var(--accent); }
 
 .tab-panel { min-height: 320px; }
+.tab-panel > div, .tab-panel > section { animation: fadeIn 0.18s ease; }
 
 .urgent-text { color: var(--accent); font-weight: 500; font-size: 12px; font-family: var(--font-mono); }
 
