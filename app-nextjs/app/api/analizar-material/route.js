@@ -125,17 +125,41 @@ async function callGemini(apiKey, parts, systemPrompt) {
 
 export async function POST(request) {
   try {
-    const { fileUrl, mimeType, fileName, materia, fileSize, promptType } = await request.json()
+    const { fileUrl, fileText, mimeType, fileName, materia, fileSize, promptType } = await request.json()
     const canvasToken = request.headers.get('x-canvas-token')
     const apiKey      = process.env.GEMINI_API_KEY
 
-    if (!apiKey)      return Response.json({ error: 'GEMINI_API_KEY no configurada.' }, { status: 500 })
-    if (!fileUrl)     return Response.json({ error: 'fileUrl requerido.' }, { status: 400 })
-    if (!canvasToken) return Response.json({ error: 'x-canvas-token requerido.' }, { status: 400 })
+    if (!apiKey)               return Response.json({ error: 'GEMINI_API_KEY no configurada.' }, { status: 500 })
+    if (!fileUrl && !fileText) return Response.json({ error: 'fileUrl o fileText requerido.' }, { status: 400 })
+    if (!canvasToken)          return Response.json({ error: 'x-canvas-token requerido.' }, { status: 400 })
 
     const MAX_BYTES = 10 * 1024 * 1024
     if (fileSize && fileSize > MAX_BYTES) {
       return Response.json({ error: `Archivo demasiado grande (${Math.round(fileSize / 1024 / 1024)} MB > 10 MB).` }, { status: 422 })
+    }
+
+    // Si se pasa texto directamente (páginas Canvas), usarlo sin descargar
+    if (fileText) {
+      const text = String(fileText).slice(0, 15_000)
+      const filePrompt = promptType === 'cronograma' ? PROMPT_CRONOGRAMA
+                       : promptType === 'notas'      ? PROMPT_NOTAS
+                       : PROMPT_STANDARD
+      const parts = [{
+        text: `Nombre: "${fileName}"\nMateria: "${materia}"\n\nContenido:\n${text}\n\n${filePrompt}`,
+      }]
+      let analysis = null, lastErr = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const rawText = await callGemini(apiKey, parts, SYSTEM_PROMPT)
+          analysis = extractJson(rawText)
+          if (analysis) break
+        } catch (err) {
+          lastErr = err
+          if (attempt === 0) await new Promise(r => setTimeout(r, 2000))
+        }
+      }
+      if (!analysis) return Response.json({ error: lastErr?.message || 'Sin respuesta' }, { status: 422 })
+      return Response.json({ ...analysis, _charCount: text.length, _truncated: fileText.length > 15_000 })
     }
 
     const mime = normalizeMime(mimeType)
